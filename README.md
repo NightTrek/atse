@@ -48,6 +48,15 @@ make install  # Install to $GOPATH/bin
 ### Basic Usage
 
 ```bash
+# Search for a symbol (recommended first step)
+atse search authenticate ./src
+
+# Build a dependency graph
+atse graph AuthService ./src --mode bfs --depth 3
+
+# Extract full source code for a feature
+atse extract handleLogin ./src --depth 2
+
 # Find all calls to a function
 atse find-fn authenticate ./src
 
@@ -66,7 +75,61 @@ atse query "(function_declaration)" ./src
 
 ## 📚 Commands
 
-### `find-fn` - Find Function Calls
+### Recommended Workflow
+
+For exploring a new feature, follow this workflow:
+
+1. **`search`** - Find the entry point symbol
+2. **`graph`** - Discover the feature boundary
+3. **`extract`** - Get the full source code
+4. Use other commands (`find-fn`, `deps`, `context`) for detailed analysis
+
+### `search` - Find Symbols (Start Here!)
+Fuzzy search for functions, classes, and other symbols by name.
+
+```bash
+atse search authenticate ./src
+atse search AuthService ./src --type class
+atse search "login" ./src --fuzzy
+atse search handleRequest ./src --format json
+```
+
+**Flags:**
+- `--type <function|class|method|variable>` - Filter by symbol type
+- `--fuzzy` - Enable fuzzy matching
+
+### `graph` - Discover Feature Boundaries
+Build a dependency graph to understand feature scope and relationships.
+
+```bash
+atse graph AuthService ./src --mode bfs --depth 3
+atse graph handleLogin ./src --mode dfs --depth 5
+atse graph UserService ./src --bidirectional
+```
+
+**Flags:**
+- `--mode <bfs|dfs>` - Traversal mode (breadth-first or depth-first)
+- `--depth <n>` - Maximum traversal depth (default: 2)
+- `--bidirectional` - Show both dependencies and dependents
+
+**Use BFS** to find all related components at each level.  
+**Use DFS** to follow deep call chains.
+
+### `extract` - Extract Feature Source Code
+Extract complete source code for a feature and its dependencies.
+
+```bash
+atse extract AuthService ./src --depth 2
+atse extract handleLogin ./src --depth 3 --output feature.txt
+atse extract UserService ./src --mode bfs
+```
+
+**Flags:**
+- `--depth <n>` - Maximum traversal depth (default: 2)
+- `--mode <bfs|dfs>` - Traversal mode
+- `--output <file>` - Write to file instead of stdout
+
+### `find-fn` - Find Function Calls (Detailed Analysis)
 Locate all places where a specific function is called.
 
 ```bash
@@ -75,7 +138,7 @@ atse find-fn login ./src --format json
 atse find-fn processUser . --include "*.ts" --exclude "*.test.ts"
 ```
 
-### `list-fns` - List Functions
+### `list-fns` - List Functions (Detailed Analysis)
 Enumerate all function declarations in files.
 
 ```bash
@@ -84,7 +147,7 @@ atse list-fns ./src --format json
 atse list-fns . --include "*.go" --verbose
 ```
 
-### `deps` - Show Dependencies
+### `deps` - Show Dependencies (Detailed Analysis)
 Analyze import statements and dependencies.
 
 ```bash
@@ -93,7 +156,7 @@ atse deps ./src --format json
 atse deps . --include "*.go"
 ```
 
-### `context` - Get Code Context
+### `context` - Get Code Context (Detailed Analysis)
 Retrieve the surrounding context (function, class) for a position.
 
 ```bash
@@ -102,7 +165,7 @@ atse context ./src/api.ts:42:10 --verbose
 atse context ./src/api.ts:42:10 --format json
 ```
 
-### `query` - Raw Tree-sitter Query
+### `query` - Raw Tree-sitter Query (Power Users)
 Execute custom Tree-sitter queries (power users).
 
 ```bash
@@ -141,19 +204,36 @@ atse/
 
 ## 🔧 Development Status
 
-**Current Phase:** Phase 2 Complete - All Core Commands Implemented ✅
+**Current Phase:** Phase 3 Complete - Graph-Based Feature Discovery ✅
 
+### Phase 1: Foundation ✅ COMPLETE
 - [x] Project structure and Go module setup
 - [x] Cobra CLI framework with all core commands
 - [x] Global flags and help documentation
 - [x] Build system with proper CGO configuration
 - [x] Parser manager implementation (fully functional)
-- [x] All command implementations (`list-fns`, `find-fn`, `deps`, `context`, `query`)
-- [x] Output formatting (text, JSON, locations)
 - [x] Multi-language support (TypeScript, JavaScript, Python, Go)
 - [x] Parse tree caching
+
+### Phase 2: Core Analysis Commands ✅ COMPLETE
+- [x] `list-fns` - List all functions
+- [x] `find-fn` - Find function calls
+- [x] `deps` - Show dependencies
+- [x] `context` - Get code context
+- [x] `query` - Raw Tree-sitter queries
+- [x] Output formatting (text, JSON, locations)
+
+### Phase 3: Graph-Based Feature Discovery ✅ COMPLETE
+- [x] `search` - Fuzzy symbol search with scoring
+- [x] `graph` - Dependency graph traversal (BFS/DFS)
+- [x] `extract` - Full source code extraction for features
+
+### Next Steps
 - [ ] Comprehensive test suite
-- [ ] Configuration file support
+- [ ] Configuration file support (`.atse.toml`)
+- [ ] Performance optimizations
+- [ ] Release binaries (macOS, Linux, Windows)
+- [ ] Homebrew formula
 
 ## 🎯 Design Philosophy
 
@@ -193,23 +273,13 @@ Benefits for agents:
 
 ## 🗺️ Roadmap
 
-### Phase 1: Core Implementation ✅ COMPLETE
-- [x] Parser manager with language detection
-- [x] Implement `find-fn`, `list-fns`, `deps`, `context`, `query`
-- [x] Basic caching
-- [ ] Comprehensive unit and integration tests
+See the **Development Status** section above for current progress and next steps.
 
-### Phase 2: Advanced Features
-- [ ] Reference and definition resolution
-- [ ] Project-wide dependency graphs
-- [ ] Configuration file support (`.atse.toml`)
-- [ ] Performance optimizations
-
-### Phase 3: Distribution
-- [ ] Release binaries (macOS, Linux, Windows)
-- [ ] Homebrew formula
-- [ ] Comprehensive documentation
-- [ ] Optional MCP wrapper
+Future enhancements may include:
+- Advanced refactoring support
+- IDE integrations
+- Language server protocol (LSP) support
+- Additional language support (Rust, C++, Java, etc.)
 
 ## 📄 License
 
