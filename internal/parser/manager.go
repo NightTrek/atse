@@ -285,3 +285,246 @@ type NodeInfo struct {
 	StartPosition sitter.Point
 	EndPosition   sitter.Point
 }
+
+// TypeUsage represents where a type is used
+type TypeUsage struct {
+	TypeName  string
+	UsageType string // "parameter", "return", "field", "variable"
+	FilePath  string
+	Line      uint32
+}
+
+// Import represents an import statement
+type Import struct {
+	ImportPath string
+	Alias      string
+	FilePath   string
+	Line       uint32
+}
+
+// CallSite represents where a function is called
+type CallSite struct {
+	CallerSymbol   string
+	CallerFilePath string
+	CallerLine     uint32
+	CalledSymbol   string
+}
+
+// EventUsage represents event emitter or listener usage
+type EventUsage struct {
+	EventName string
+	Type      string // "emit", "listen", "on"
+	FilePath  string
+	Line      uint32
+}
+
+// ExtractTypeUsages finds all type references in a file
+func (m *Manager) ExtractTypeUsages(tree *sitter.Tree, langName string, content []byte, filePath string) []*TypeUsage {
+	var usages []*TypeUsage
+
+	// Build queries for type usages based on language
+	var queries []string
+	switch langName {
+	case "typescript", "javascript":
+		queries = []string{
+			`(type_annotation (type_identifier) @type)`,
+			`(type_annotation (generic_type name: (type_identifier) @type))`,
+		}
+	case "go":
+		queries = []string{
+			`(type_identifier) @type`,
+			`(qualified_type package: (package_identifier) name: (type_identifier) @type)`,
+		}
+	case "python":
+		queries = []string{
+			`(type (identifier) @type)`,
+		}
+	}
+
+	for _, queryString := range queries {
+		results, err := m.Query(tree, queryString, langName, content)
+		if err != nil {
+			continue
+		}
+
+		for _, result := range results {
+			typeName := strings.TrimSpace(result.Text)
+			if typeName != "" {
+				usages = append(usages, &TypeUsage{
+					TypeName:  typeName,
+					UsageType: "reference",
+					FilePath:  filePath,
+					Line:      result.StartPosition.Row,
+				})
+			}
+		}
+	}
+
+	return usages
+}
+
+// ExtractImports parses import/require/include statements
+func (m *Manager) ExtractImports(tree *sitter.Tree, langName string, content []byte, filePath string) []Import {
+	var imports []Import
+
+	// Build queries for imports based on language
+	var queryString string
+	switch langName {
+	case "typescript", "javascript":
+		queryString = `(import_statement source: (string) @path)`
+	case "go":
+		queryString = `(import_spec path: (interpreted_string_literal) @path)`
+	case "python":
+		queryString = `(import_statement name: (dotted_name) @path)`
+	}
+
+	if queryString == "" {
+		return imports
+	}
+
+	results, err := m.Query(tree, queryString, langName, content)
+	if err != nil {
+		return imports
+	}
+
+	for _, result := range results {
+		importPath := strings.Trim(strings.TrimSpace(result.Text), "\"'`")
+		if importPath != "" {
+			imports = append(imports, Import{
+				ImportPath: importPath,
+				FilePath:   filePath,
+				Line:       result.StartPosition.Row,
+			})
+		}
+	}
+
+	return imports
+}
+
+// ExtractCallSites finds all function call expressions
+func (m *Manager) ExtractCallSites(tree *sitter.Tree, langName string, content []byte, filePath string) []CallSite {
+	var callSites []CallSite
+
+	// Build queries for function calls based on language
+	var queryString string
+	switch langName {
+	case "typescript", "javascript":
+		queryString = `(call_expression function: (identifier) @name)`
+	case "go":
+		queryString = `(call_expression function: (identifier) @name)`
+	case "python":
+		queryString = `(call function: (identifier) @name)`
+	}
+
+	if queryString == "" {
+		return callSites
+	}
+
+	results, err := m.Query(tree, queryString, langName, content)
+	if err != nil {
+		return callSites
+	}
+
+	// For each call, try to find the containing function
+	for _, result := range results {
+		calledName := strings.TrimSpace(result.Text)
+		if calledName == "" {
+			continue
+		}
+
+		// Find containing function
+		caller := m.findContainingFunction(tree, result.StartPosition.Row, content)
+
+		callSites = append(callSites, CallSite{
+			CallerSymbol:   caller,
+			CallerFilePath: filePath,
+			CallerLine:     result.StartPosition.Row,
+			CalledSymbol:   calledName,
+		})
+	}
+
+	return callSites
+}
+
+// findContainingFunction finds the function that contains a given line
+func (m *Manager) findContainingFunction(tree *sitter.Tree, line uint32, content []byte) string {
+	point := sitter.Point{Row: line, Column: 0}
+	node := tree.RootNode().NamedDescendantForPointRange(point, point)
+
+	if node == nil {
+		return "(global)"
+	}
+
+	// Walk up the tree to find a function
+	blockTypes := map[string]bool{
+		"function_declaration": true,
+		"method_definition":    true,
+		"method_declaration":   true,
+		"function_definition":  true,
+	}
+
+	current := node
+	for current != nil {
+		if blockTypes[current.Type()] {
+			// Try to get function name
+			nameNode := current.ChildByFieldName("name")
+			if nameNode != nil {
+				return nameNode.Content(content)
+			}
+		}
+		current = current.Parent()
+	}
+
+	return "(anonymous)"
+}
+
+// ExtractEventPatterns finds event emitter/listener patterns
+func (m *Manager) ExtractEventPatterns(tree *sitter.Tree, langName string, content []byte, filePath string) []EventUsage {
+	var events []EventUsage
+
+	// For now, use a simple pattern: look for .on(), .emit(), addEventListener calls
+	// This is language-agnostic at the call site level
+	var queryString string
+	switch langName {
+	case "typescript", "javascript":
+		queryString = `(call_expression
+			function: (member_expression
+				property: (property_identifier) @method)
+			arguments: (arguments (string) @event))`
+	default:
+		return events
+	}
+
+	results, err := m.Query(tree, queryString, langName, content)
+	if err != nil {
+		return events
+	}
+
+	// Process results in pairs (method, event)
+	for i := 0; i+1 < len(results); i += 2 {
+		methodName := strings.TrimSpace(results[i].Text)
+		eventName := strings.Trim(strings.TrimSpace(results[i+1].Text), "\"'`")
+
+		// Check if it's an event-related method
+		eventType := ""
+		switch methodName {
+		case "on", "addEventListener", "addListener", "once":
+			eventType = "listen"
+		case "emit", "dispatchEvent", "fire", "trigger":
+			eventType = "emit"
+		default:
+			continue
+		}
+
+		if eventName != "" && eventType != "" {
+			events = append(events, EventUsage{
+				EventName: eventName,
+				Type:      eventType,
+				FilePath:  filePath,
+				Line:      results[i].StartPosition.Row,
+			})
+		}
+	}
+
+	return events
+}

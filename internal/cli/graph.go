@@ -18,6 +18,8 @@ var (
 	bidirectionalFlag    bool
 	showDependenciesFlag bool
 	showDependentsFlag   bool
+	connectionTypesFlag  string
+	maxSymbolsFlag       int
 )
 
 var graphCmd = &cobra.Command{
@@ -62,26 +64,68 @@ func runGraph(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Build the graph
-	graph := NewFeatureGraph(symbol, graphDepthFlag)
+	if verboseFlag {
+		fmt.Fprintf(os.Stderr, "Collected %d files to analyze\n", len(files))
+	}
 
-	// Find the entry point symbol
-	entryPoint := findEntryPoint(mgr, files, symbol)
-	if entryPoint == nil {
+	// BUILD SYMBOL INDEX (NEW!)
+	index, err := buildSymbolIndex(mgr, files, verboseFlag)
+	if err != nil {
+		return fmt.Errorf("failed to build symbol index: %w", err)
+	}
+
+	// Find the entry point using the index (O(1) lookup!)
+	if verboseFlag {
+		fmt.Fprintf(os.Stderr, "Finding entry point: %s...\n", symbol)
+	}
+
+	entryNodes := index.FindSymbol(symbol)
+	if len(entryNodes) == 0 {
 		fmt.Printf("Symbol '%s' not found in codebase.\n", symbol)
 		return nil
 	}
 
+	entryPoint := entryNodes[0] // Use first match
+	entryPoint.Level = 0
+
+	if verboseFlag {
+		fmt.Fprintf(os.Stderr, "  ✓ Found %s in %s at line %d\n\n", symbol, entryPoint.FilePath, entryPoint.Line+1)
+	}
+
+	// Parse connection types
+	connTypes, err := parseConnectionTypes(connectionTypesFlag)
+	if err != nil {
+		return fmt.Errorf("invalid connection types: %w", err)
+	}
+
+	// Create connection finders
+	finders := createConnectionFinders(connTypes)
+
+	if verboseFlag {
+		typeNames := make([]string, len(connTypes))
+		for i, t := range connTypes {
+			typeNames[i] = string(t)
+		}
+		fmt.Fprintf(os.Stderr, "Traversing graph (mode=%s, depth=%d, max_symbols=%d, connections=%s)...\n",
+			graphModeFlag, graphDepthFlag, maxSymbolsFlag, strings.Join(typeNames, ","))
+	}
+
+	// Build the graph using NEW index-based traversal
+	graph := NewFeatureGraph(symbol, graphDepthFlag)
 	graph.EntryPoint = entryPoint
 
-	// Traverse based on mode
+	// Traverse based on mode (uses index + connection finders)
 	switch graphModeFlag {
 	case "bfs":
-		traverseBFS(mgr, files, graph, bidirectionalFlag)
+		traverseBFSWithIndex(index, graph, finders, maxSymbolsFlag)
 	case "dfs":
-		traverseDFS(mgr, files, graph, bidirectionalFlag)
+		traverseDFSWithIndex(index, graph, finders, maxSymbolsFlag)
 	default:
 		return fmt.Errorf("invalid mode: %s (use 'bfs' or 'dfs')", graphModeFlag)
+	}
+
+	if verboseFlag {
+		fmt.Fprintf(os.Stderr, "\n✓ Graph traversal complete: %d symbols found\n\n", len(graph.Nodes))
 	}
 
 	// Format and output
@@ -188,7 +232,106 @@ func findEntryPoint(mgr *parser.Manager, files []util.FileMatch, symbol string) 
 	return nil
 }
 
-// traverseBFS performs breadth-first search to discover feature boundaries
+// traverseBFSWithIndex performs BFS using the symbol index
+func traverseBFSWithIndex(index *SymbolIndex, graph *FeatureGraph, finders []ConnectionFinder, maxSymbols int) {
+	visited := make(map[string]bool)
+	queue := []*GraphNode{graph.EntryPoint}
+	visited[graph.EntryPoint.Symbol] = true
+	graph.Nodes[graph.EntryPoint.Symbol] = graph.EntryPoint
+
+	if verboseFlag {
+		fmt.Fprintf(os.Stderr, "\nLevel 0 (Entry Point): %s\n", graph.EntryPoint.Symbol)
+	}
+
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+
+		// Check max symbols limit
+		if maxSymbols > 0 && len(graph.Nodes) >= maxSymbols {
+			if verboseFlag {
+				fmt.Fprintf(os.Stderr, "\n⚠️  Reached max symbols limit (%d)\n", maxSymbols)
+			}
+			break
+		}
+
+		// Stop if we've reached max depth
+		if current.Level >= graph.MaxDepth {
+			continue
+		}
+
+		if verboseFlag {
+			fmt.Fprintf(os.Stderr, "  Processing: %s (level %d)\n", current.Symbol, current.Level)
+		}
+
+		// Find connections using all finders
+		for _, finder := range finders {
+			connections := finder.FindConnections(current, index)
+
+			for _, conn := range connections {
+				if !visited[conn.To.Symbol] {
+					conn.To.Level = current.Level + 1
+					visited[conn.To.Symbol] = true
+					graph.Nodes[conn.To.Symbol] = conn.To
+					queue = append(queue, conn.To)
+
+					// Record edge
+					graph.Dependencies[current.Symbol] = append(graph.Dependencies[current.Symbol], conn.To.Symbol)
+				}
+			}
+		}
+	}
+}
+
+// traverseDFSWithIndex performs DFS using the symbol index
+func traverseDFSWithIndex(index *SymbolIndex, graph *FeatureGraph, finders []ConnectionFinder, maxSymbols int) {
+	visited := make(map[string]bool)
+	graph.Nodes[graph.EntryPoint.Symbol] = graph.EntryPoint
+
+	if verboseFlag {
+		fmt.Fprintf(os.Stderr, "\nStarting DFS from: %s\n", graph.EntryPoint.Symbol)
+	}
+
+	var dfs func(*GraphNode)
+	dfs = func(current *GraphNode) {
+		visited[current.Symbol] = true
+
+		// Check max symbols limit
+		if maxSymbols > 0 && len(graph.Nodes) >= maxSymbols {
+			if verboseFlag {
+				fmt.Fprintf(os.Stderr, "\n⚠️  Reached max symbols limit (%d)\n", maxSymbols)
+			}
+			return
+		}
+
+		// Stop if we've reached max depth
+		if current.Level >= graph.MaxDepth {
+			return
+		}
+
+		if verboseFlag {
+			fmt.Fprintf(os.Stderr, "  Processing: %s (level %d)\n", current.Symbol, current.Level)
+		}
+
+		// Find connections using all finders
+		for _, finder := range finders {
+			connections := finder.FindConnections(current, index)
+
+			for _, conn := range connections {
+				if !visited[conn.To.Symbol] {
+					conn.To.Level = current.Level + 1
+					graph.Nodes[conn.To.Symbol] = conn.To
+					graph.Dependencies[current.Symbol] = append(graph.Dependencies[current.Symbol], conn.To.Symbol)
+					dfs(conn.To)
+				}
+			}
+		}
+	}
+
+	dfs(graph.EntryPoint)
+}
+
+// traverseBFS performs breadth-first search to discover feature boundaries (OLD - DEPRECATED)
 func traverseBFS(mgr *parser.Manager, files []util.FileMatch, graph *FeatureGraph, bidirectional bool) {
 	visited := make(map[string]bool)
 	queue := []*GraphNode{graph.EntryPoint}
@@ -536,4 +679,6 @@ func init() {
 	graphCmd.Flags().BoolVar(&bidirectionalFlag, "bidirectional", false, "Show both dependencies and dependents")
 	graphCmd.Flags().BoolVar(&showDependenciesFlag, "show-dependencies", true, "Show what this symbol depends on")
 	graphCmd.Flags().BoolVar(&showDependentsFlag, "show-dependents", false, "Show what depends on this symbol")
+	graphCmd.Flags().StringVar(&connectionTypesFlag, "connection-types", "calls", "Connection types to follow: calls, types, imports, dataflow, events, or 'all'")
+	graphCmd.Flags().IntVar(&maxSymbolsFlag, "max-symbols", 500, "Maximum number of symbols to discover (0 = no limit)")
 }
