@@ -1,0 +1,7 @@
+{
+  "id": "query_pipeline",
+  "canonical_explanation": "TODO: Fill in with a concise description of the DQL / GraphQL+ query pipeline from request to response.",
+  "required_files": [],
+  "optional_files": [],
+  "required_packages": []
+}

@@ -1,0 +1,16 @@
+id: query_pipeline
+name: "Query Execution and Graph Traversal Pipeline"
+question: |
+  Trace how a DQL / GraphQL+ query is handled inside Dgraph from the moment it
+  arrives over HTTP or gRPC until results are returned to the client. Describe
+  the major stages (parsing, validation, planning, execution, and result
+  serialization) and identify the key packages and source files that implement
+  each stage.
+
+entry_repo: "https://github.com/dgraph-io/dgraph.git"
+entry_ref: "v25.0.0"
+
+expected_output_schema: "v1"
+run_config:
+  runs_per_agent: 10
+  max_duration_minutes: 20

@@ -80,6 +80,17 @@ func runListFns(args []string) error {
 
 	// Format and print results
 	formatted := output.FormatResults(results, output.Format(formatFlag), verboseFlag)
+
+	logMetrics(MetricsLogConfig{
+		Enabled:    logMetricsFlag,
+		LogFile:    metricsLogFile,
+		TokenModel: tokenModelFlag,
+		Command:    "list-fns",
+		Args:       os.Args[1:],
+		Format:     formatFlag,
+		ExitCode:   0,
+	}, formatted)
+
 	fmt.Print(formatted)
 
 	return nil

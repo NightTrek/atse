@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/NightTrek/atse/internal/output"
 	"github.com/NightTrek/atse/internal/parser"
@@ -95,6 +96,17 @@ func runQuery(cmd *cobra.Command, args []string) error {
 
 	// Format and output results
 	result := output.FormatResults(allResults, output.Format(formatFlag), verboseFlag)
+
+	logMetrics(MetricsLogConfig{
+		Enabled:    logMetricsFlag,
+		LogFile:    metricsLogFile,
+		TokenModel: tokenModelFlag,
+		Command:    "query",
+		Args:       os.Args[1:],
+		Format:     formatFlag,
+		ExitCode:   0,
+	}, result)
+
 	fmt.Print(result)
 
 	return nil

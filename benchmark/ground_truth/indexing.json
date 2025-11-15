@@ -1,0 +1,7 @@
+{
+  "id": "indexing",
+  "canonical_explanation": "TODO: Fill in with a concise description of indexing and tokenization (term, full-text, n-gram) in Dgraph.",
+  "required_files": [],
+  "optional_files": [],
+  "required_packages": []
+}

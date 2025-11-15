@@ -1,0 +1,15 @@
+id: storage
+name: "On-Disk Data Storage and Posting Lists"
+question: |
+  Explain how Dgraph stores predicates, edges, and values on disk. Focus on the
+  core data structures such as posting lists and the write/read paths that
+  interact with them. Identify the key packages and source files that define the
+  storage format, manage writes, and serve reads.
+
+entry_repo: "https://github.com/dgraph-io/dgraph.git"
+entry_ref: "v25.0.0"
+
+expected_output_schema: "v1"
+run_config:
+  runs_per_agent: 10
+  max_duration_minutes: 20

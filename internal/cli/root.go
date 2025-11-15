@@ -16,6 +16,10 @@ var (
 	excludeFlag   []string
 	limitFlag     int
 	noCacheFlag   bool
+
+	logMetricsFlag bool
+	metricsLogFile string
+	tokenModelFlag string
 )
 
 var rootCmd = &cobra.Command{
@@ -47,6 +51,11 @@ func init() {
 	rootCmd.PersistentFlags().StringSliceVar(&excludeFlag, "exclude", []string{}, "Exclude file patterns (e.g., '*.test.ts')")
 	rootCmd.PersistentFlags().IntVar(&limitFlag, "limit", 0, "Limit number of results (0 = no limit)")
 	rootCmd.PersistentFlags().BoolVar(&noCacheFlag, "no-cache", false, "Bypass parse tree cache")
+
+	// Metrics logging flags (token counting + JSONL logs)
+	rootCmd.PersistentFlags().BoolVar(&logMetricsFlag, "log-metrics", false, "Log command output token metrics to a JSONL file")
+	rootCmd.PersistentFlags().StringVar(&metricsLogFile, "metrics-log-file", "benchmark/results/raw/token_metrics.jsonl", "Path to append metrics logs (JSONL)")
+	rootCmd.PersistentFlags().StringVar(&tokenModelFlag, "token-model", "gpt-4o", "Model name used for token counting (for reference only)")
 }
 
 // Execute runs the root command

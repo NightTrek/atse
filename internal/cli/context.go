@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -71,6 +72,17 @@ func runContext(cmd *cobra.Command, args []string) error {
 
 	// Format and output
 	result := output.FormatContext(context, filePath, row, column, output.Format(formatFlag))
+
+	logMetrics(MetricsLogConfig{
+		Enabled:    logMetricsFlag,
+		LogFile:    metricsLogFile,
+		TokenModel: tokenModelFlag,
+		Command:    "context",
+		Args:       os.Args[1:],
+		Format:     formatFlag,
+		ExitCode:   0,
+	}, result)
+
 	fmt.Print(result)
 
 	return nil

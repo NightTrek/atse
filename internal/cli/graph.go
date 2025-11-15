@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/NightTrek/atse/internal/parser"
@@ -80,7 +81,19 @@ func runGraph(cmd *cobra.Command, args []string) error {
 	}
 
 	// Format and output
-	formatGraph(graph, verboseFlag)
+	formatted := captureGraph(graph, verboseFlag)
+
+	logMetrics(MetricsLogConfig{
+		Enabled:    logMetricsFlag,
+		LogFile:    metricsLogFile,
+		TokenModel: tokenModelFlag,
+		Command:    "graph",
+		Args:       os.Args[1:],
+		Format:     formatFlag,
+		ExitCode:   0,
+	}, formatted)
+
+	fmt.Print(formatted)
 
 	return nil
 }
@@ -434,10 +447,11 @@ func buildSpecificCallQuery(langName, funcName string) string {
 	}
 }
 
-// formatGraph formats and outputs the feature graph
-func formatGraph(graph *FeatureGraph, verbose bool) {
-	fmt.Printf("Feature Graph for %s (%s, depth=%d):\n\n",
-		graph.EntryPoint.Symbol, graphModeFlag, graph.MaxDepth)
+// captureGraph formats the feature graph and returns as string
+func captureGraph(graph *FeatureGraph, verbose bool) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Feature Graph for %s (%s, depth=%d):\n\n",
+		graph.EntryPoint.Symbol, graphModeFlag, graph.MaxDepth))
 
 	// Group nodes by level
 	levelNodes := make(map[int][]*GraphNode)
@@ -453,32 +467,39 @@ func formatGraph(graph *FeatureGraph, verbose bool) {
 		}
 
 		if level == 0 {
-			fmt.Printf("Level 0 (Entry Point):\n")
+			sb.WriteString("Level 0 (Entry Point):\n")
 		} else {
-			fmt.Printf("Level %d:\n", level)
+			sb.WriteString(fmt.Sprintf("Level %d:\n", level))
 		}
 
 		for _, node := range nodes {
 			relPath := makeRelativePath(node.FilePath)
-			fmt.Printf("  %s (%s) - %s:%d\n", node.Symbol, node.Type, relPath, node.Line+1)
+			sb.WriteString(fmt.Sprintf("  %s (%s) - %s:%d\n", node.Symbol, node.Type, relPath, node.Line+1))
 
 			if verbose {
 				// Show dependencies
 				if deps, ok := graph.Dependencies[node.Symbol]; ok && len(deps) > 0 {
-					fmt.Printf("    → calls: %s\n", strings.Join(deps, ", "))
+					sb.WriteString(fmt.Sprintf("    → calls: %s\n", strings.Join(deps, ", ")))
 				}
 				// Show dependents
 				if dependents, ok := graph.Dependents[node.Symbol]; ok && len(dependents) > 0 {
-					fmt.Printf("    ← called by: %s\n", strings.Join(dependents, ", "))
+					sb.WriteString(fmt.Sprintf("    ← called by: %s\n", strings.Join(dependents, ", ")))
 				}
 			}
 		}
-		fmt.Println()
+		sb.WriteString("\n")
 	}
 
 	// Summary
 	fileCount := countUniqueFiles(graph)
-	fmt.Printf("Found %d components across %d files\n", len(graph.Nodes), fileCount)
+	sb.WriteString(fmt.Sprintf("Found %d components across %d files\n", len(graph.Nodes), fileCount))
+
+	return sb.String()
+}
+
+// formatGraph formats and outputs the feature graph
+func formatGraph(graph *FeatureGraph, verbose bool) {
+	fmt.Print(captureGraph(graph, verbose))
 }
 
 // countUniqueFiles counts unique files in the graph

@@ -1,0 +1,29 @@
+# Global benchmark configuration
+
+model:
+  # Logical name; actual provider/model wiring is handled by the Cline CLI config
+  name: "default-benchmark-model"
+
+runs:
+  # Default number of runs per agent per case (can be overridden in individual case files)
+  default_runs_per_agent: 10
+  # Safety cap for each (agent, case) run in minutes
+  max_duration_minutes: 20
+
+repos:
+  dgraph:
+    url: "https://github.com/dgraph-io/dgraph.git"
+    # Tag or commit to benchmark against. Keep this pinned for reproducibility.
+    ref: "v25.0.0"
+
+paths:
+  # Relative to repo root inside the container
+  work_root: "/work"
+  dgraph_dir_name: "dgraph"
+  atse_dir_name: "atse"
+
+output:
+  # Base directory for benchmark results (relative to benchmark/)
+  results_dir: "results"
+  raw_subdir: "raw"
+  summaries_subdir: "summaries"

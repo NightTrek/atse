@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/NightTrek/atse/internal/parser"
@@ -84,6 +85,16 @@ func runExtract(cmd *cobra.Command, args []string) error {
 		// TODO: Write to file
 		fmt.Printf("Writing to %s...\n", outputFileFlag)
 	}
+
+	logMetrics(MetricsLogConfig{
+		Enabled:    logMetricsFlag,
+		LogFile:    metricsLogFile,
+		TokenModel: tokenModelFlag,
+		Command:    "extract",
+		Args:       os.Args[1:],
+		Format:     formatFlag,
+		ExitCode:   0,
+	}, extractedCode)
 
 	// Print to stdout
 	fmt.Print(extractedCode)

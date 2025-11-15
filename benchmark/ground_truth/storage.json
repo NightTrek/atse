@@ -1,0 +1,7 @@
+{
+  "id": "storage",
+  "canonical_explanation": "TODO: Fill in with a concise description of on-disk storage, posting lists, and read/write paths in Dgraph.",
+  "required_files": [],
+  "optional_files": [],
+  "required_packages": []
+}

@@ -1,0 +1,7 @@
+{
+  "id": "backup",
+  "canonical_explanation": "TODO: Fill in with a concise description of the backup and restore pipeline in Dgraph.",
+  "required_files": [],
+  "optional_files": [],
+  "required_packages": []
+}

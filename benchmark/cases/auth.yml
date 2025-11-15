@@ -1,0 +1,16 @@
+id: auth
+name: "Authentication and Authorization"
+question: |
+  Explain how Dgraph implements authentication and authorization for clients
+  (DQL, GraphQL, and gRPC). Identify the main components and code paths involved,
+  and list the key source files that implement these behaviors.
+
+entry_repo: "https://github.com/dgraph-io/dgraph.git"
+entry_ref: "v25.0.0"
+
+expected_output_schema: "v1"
+run_config:
+  # Number of independent runs per agent (baseline, atse) for this case.
+  runs_per_agent: 10
+  # Safety cap per (agent, case) run in minutes.
+  max_duration_minutes: 20

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -107,7 +108,19 @@ func runSearch(cmd *cobra.Command, args []string) error {
 	}
 
 	// Format and output
-	formatSearchResults(matches, output.Format(formatFlag), verboseFlag)
+	formatted := captureSearchResults(matches, output.Format(formatFlag), verboseFlag)
+
+	logMetrics(MetricsLogConfig{
+		Enabled:    logMetricsFlag,
+		LogFile:    metricsLogFile,
+		TokenModel: tokenModelFlag,
+		Command:    "search",
+		Args:       os.Args[1:],
+		Format:     formatFlag,
+		ExitCode:   0,
+	}, formatted)
+
+	fmt.Print(formatted)
 
 	return nil
 }
@@ -301,47 +314,46 @@ func sortMatches(matches []SymbolMatch, query string) {
 	})
 }
 
-// formatSearchResults formats and outputs search results
-func formatSearchResults(matches []SymbolMatch, format output.Format, verbose bool) {
+// captureSearchResults formats search results and returns as string
+func captureSearchResults(matches []SymbolMatch, format output.Format, verbose bool) string {
 	if len(matches) == 0 {
-		fmt.Println("No symbols found matching query.")
-		return
+		return "No symbols found matching query.\n"
 	}
 
 	switch format {
 	case output.FormatJSON:
-		formatSearchJSON(matches)
+		return captureSearchJSON(matches)
 	case output.FormatLocations:
-		formatSearchLocations(matches)
+		return captureSearchLocations(matches)
 	default:
-		formatSearchText(matches, verbose)
+		return captureSearchText(matches, verbose)
 	}
 }
 
-// formatSearchText formats results as human-readable text
-func formatSearchText(matches []SymbolMatch, verbose bool) {
-	// Group by file for better readability
-	fileGroups := make(map[string][]SymbolMatch)
-	for _, match := range matches {
-		fileGroups[match.FilePath] = append(fileGroups[match.FilePath], match)
-	}
+// formatSearchResults formats and outputs search results
+func formatSearchResults(matches []SymbolMatch, format output.Format, verbose bool) {
+	fmt.Print(captureSearchResults(matches, format, verbose))
+}
 
-	fmt.Printf("Found %d symbol(s):\n\n", len(matches))
+// captureSearchText formats results as human-readable text and returns string
+func captureSearchText(matches []SymbolMatch, verbose bool) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Found %d symbol(s):\n\n", len(matches)))
 
 	for _, match := range matches {
 		// Make path relative
 		relPath := makeRelativePath(match.FilePath)
-
-		fmt.Printf("%s (%s) - %s:%d\n", match.Name, match.Type, relPath, match.Line+1)
+		sb.WriteString(fmt.Sprintf("%s (%s) - %s:%d\n", match.Name, match.Type, relPath, match.Line+1))
 
 		if verbose && match.Signature != "" {
-			fmt.Printf("  %s\n", match.Signature)
+			sb.WriteString(fmt.Sprintf("  %s\n", match.Signature))
 		}
 	}
+	return sb.String()
 }
 
-// formatSearchJSON formats results as JSON
-func formatSearchJSON(matches []SymbolMatch) {
+// captureSearchJSON formats results as JSON and returns string
+func captureSearchJSON(matches []SymbolMatch) string {
 	// Convert to simple structure
 	type JSONMatch struct {
 		Name      string `json:"name"`
@@ -365,14 +377,31 @@ func formatSearchJSON(matches []SymbolMatch) {
 	}
 
 	data, _ := json.MarshalIndent(jsonMatches, "", "  ")
-	fmt.Println(string(data))
+	return string(data) + "\n"
+}
+
+// captureSearchLocations formats results as simple locations and returns string
+func captureSearchLocations(matches []SymbolMatch) string {
+	var sb strings.Builder
+	for _, match := range matches {
+		sb.WriteString(fmt.Sprintf("%s:%d:%d\n", match.FilePath, match.Line+1, match.Column))
+	}
+	return sb.String()
+}
+
+// formatSearchText formats results as human-readable text
+func formatSearchText(matches []SymbolMatch, verbose bool) {
+	fmt.Print(captureSearchText(matches, verbose))
+}
+
+// formatSearchJSON formats results as JSON
+func formatSearchJSON(matches []SymbolMatch) {
+	fmt.Print(captureSearchJSON(matches))
 }
 
 // formatSearchLocations formats results as simple locations
 func formatSearchLocations(matches []SymbolMatch) {
-	for _, match := range matches {
-		fmt.Printf("%s:%d:%d\n", match.FilePath, match.Line+1, match.Column)
-	}
+	fmt.Print(captureSearchLocations(matches))
 }
 
 // makeRelativePath converts absolute path to relative if possible

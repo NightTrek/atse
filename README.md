@@ -186,6 +186,31 @@ All commands support these flags:
 - `--limit <n>` - Limit number of results (0 = no limit)
 - `--no-cache` - Bypass parse tree cache
 
+### 📊 Token Metrics & Benchmarking
+
+ATSE includes built-in token counting to help benchmark its efficiency:
+
+- `--log-metrics` - Enable token metrics logging to JSONL file
+- `--metrics-log-file <path>` - Log file path (default: `benchmark/results/raw/token_metrics.jsonl`)
+- `--token-model <name>` - Tokenizer model for counting (default: `gpt-4o`)
+
+**Example:**
+```bash
+# Run any command with metrics logging
+atse search authenticate ./src --log-metrics
+
+# Analyze the token usage
+cat benchmark/results/raw/token_metrics.jsonl | jq .
+```
+
+Each log entry captures:
+- Command name and arguments
+- Output character count and token count (using tiktoken-compatible tokenizer)
+- Model used for token counting
+- Timestamp and version
+
+This enables you to **prove ATSE's token efficiency** by comparing its output against raw file reads or other tools.
+
 ## 🏗️ Architecture
 
 ```

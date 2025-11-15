@@ -1,0 +1,15 @@
+id: backup
+name: "Backup and Restore Pipeline"
+question: |
+  Explain how backup and restore work in Dgraph. Describe how backup jobs are
+  initiated, how data is read from the cluster, written to external storage, and
+  later restored. Identify the key packages and source files that orchestrate
+  backup and restore, interact with storage backends, and ensure data integrity.
+
+entry_repo: "https://github.com/dgraph-io/dgraph.git"
+entry_ref: "v25.0.0"
+
+expected_output_schema: "v1"
+run_config:
+  runs_per_agent: 10
+  max_duration_minutes: 20
