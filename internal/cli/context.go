@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/NightTrek/atse/internal/output"
 	"github.com/NightTrek/atse/internal/parser"
@@ -28,6 +29,9 @@ Examples:
 }
 
 func runContext(cmd *cobra.Command, args []string) error {
+	startTime := time.Now()
+	startMem := captureMemoryStats()
+
 	// Parse file:line:column format
 	parts := strings.Split(args[0], ":")
 	if len(parts) != 3 {
@@ -73,15 +77,30 @@ func runContext(cmd *cobra.Command, args []string) error {
 	// Format and output
 	result := output.FormatContext(context, filePath, row, column, output.Format(formatFlag))
 
-	logMetrics(MetricsLogConfig{
-		Enabled:    logMetricsFlag,
-		LogFile:    metricsLogFile,
-		TokenModel: tokenModelFlag,
-		Command:    "context",
-		Args:       os.Args[1:],
-		Format:     formatFlag,
-		ExitCode:   0,
-	}, result)
+	// Capture peak and end memory
+	peakMem := captureMemoryStats()
+	endMem := peakMem
+
+	// For context command, we process 1 file and return 1 result (the context)
+	metricsConfig := MetricsLogConfig{
+		Enabled:          logMetricsFlag,
+		LogFile:          metricsLogFile,
+		TokenModel:       tokenModelFlag,
+		Command:          "context",
+		Args:             os.Args[1:],
+		Format:           formatFlag,
+		ExitCode:         0,
+		StartTime:        startTime,
+		EndTime:          time.Now(),
+		StartMemoryBytes: startMem,
+		PeakMemoryBytes:  peakMem,
+		EndMemoryBytes:   endMem,
+		FilesProcessed:   1,
+		ResultsCount:     1,
+	}
+
+	logMetrics(metricsConfig, result)
+	logBenchmark(metricsConfig, result)
 
 	fmt.Print(result)
 

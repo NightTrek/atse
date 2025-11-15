@@ -5,6 +5,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"encoding/json"
 
@@ -38,6 +39,9 @@ Examples:
 }
 
 func runSearch(cmd *cobra.Command, args []string) error {
+	startTime := time.Now()
+	startMem := captureMemoryStats()
+
 	query := args[0]
 	path := "."
 	if len(args) > 1 {
@@ -60,6 +64,7 @@ func runSearch(cmd *cobra.Command, args []string) error {
 
 	// Search for symbols
 	var matches []SymbolMatch
+	filesProcessed := 0
 
 	for _, file := range files {
 		// Parse the file
@@ -92,6 +97,7 @@ func runSearch(cmd *cobra.Command, args []string) error {
 		// Find symbols in this file
 		fileMatches := findSymbols(mgr, tree, langName, content, file.Path, query)
 		matches = append(matches, fileMatches...)
+		filesProcessed++
 	}
 
 	// Filter by type if specified
@@ -110,15 +116,29 @@ func runSearch(cmd *cobra.Command, args []string) error {
 	// Format and output
 	formatted := captureSearchResults(matches, output.Format(formatFlag), verboseFlag)
 
-	logMetrics(MetricsLogConfig{
-		Enabled:    logMetricsFlag,
-		LogFile:    metricsLogFile,
-		TokenModel: tokenModelFlag,
-		Command:    "search",
-		Args:       os.Args[1:],
-		Format:     formatFlag,
-		ExitCode:   0,
-	}, formatted)
+	// Capture peak and end memory
+	peakMem := captureMemoryStats()
+	endMem := peakMem
+
+	metricsConfig := MetricsLogConfig{
+		Enabled:          logMetricsFlag,
+		LogFile:          metricsLogFile,
+		TokenModel:       tokenModelFlag,
+		Command:          "search",
+		Args:             os.Args[1:],
+		Format:           formatFlag,
+		ExitCode:         0,
+		StartTime:        startTime,
+		EndTime:          time.Now(),
+		StartMemoryBytes: startMem,
+		PeakMemoryBytes:  peakMem,
+		EndMemoryBytes:   endMem,
+		FilesProcessed:   filesProcessed,
+		ResultsCount:     len(matches),
+	}
+
+	logMetrics(metricsConfig, formatted)
+	logBenchmark(metricsConfig, formatted)
 
 	fmt.Print(formatted)
 

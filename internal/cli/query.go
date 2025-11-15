@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/NightTrek/atse/internal/output"
 	"github.com/NightTrek/atse/internal/parser"
@@ -28,6 +29,9 @@ Examples:
 }
 
 func runQuery(cmd *cobra.Command, args []string) error {
+	startTime := time.Now()
+	startMem := captureMemoryStats()
+
 	queryString := args[0]
 	path := "."
 	if len(args) > 1 {
@@ -50,6 +54,7 @@ func runQuery(cmd *cobra.Command, args []string) error {
 
 	// Process each file
 	var allResults []output.Result
+	filesProcessed := 0
 
 	for _, file := range files {
 		// Parse the file
@@ -92,20 +97,35 @@ func runQuery(cmd *cobra.Command, args []string) error {
 		for _, match := range matches {
 			allResults = append(allResults, output.QueryMatchToResult(match, file.Path))
 		}
+		filesProcessed++
 	}
 
 	// Format and output results
 	result := output.FormatResults(allResults, output.Format(formatFlag), verboseFlag)
 
-	logMetrics(MetricsLogConfig{
-		Enabled:    logMetricsFlag,
-		LogFile:    metricsLogFile,
-		TokenModel: tokenModelFlag,
-		Command:    "query",
-		Args:       os.Args[1:],
-		Format:     formatFlag,
-		ExitCode:   0,
-	}, result)
+	// Capture peak and end memory
+	peakMem := captureMemoryStats()
+	endMem := peakMem
+
+	metricsConfig := MetricsLogConfig{
+		Enabled:          logMetricsFlag,
+		LogFile:          metricsLogFile,
+		TokenModel:       tokenModelFlag,
+		Command:          "query",
+		Args:             os.Args[1:],
+		Format:           formatFlag,
+		ExitCode:         0,
+		StartTime:        startTime,
+		EndTime:          time.Now(),
+		StartMemoryBytes: startMem,
+		PeakMemoryBytes:  peakMem,
+		EndMemoryBytes:   endMem,
+		FilesProcessed:   filesProcessed,
+		ResultsCount:     len(allResults),
+	}
+
+	logMetrics(metricsConfig, result)
+	logBenchmark(metricsConfig, result)
 
 	fmt.Print(result)
 

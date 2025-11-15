@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/NightTrek/atse/internal/parser"
 	"github.com/NightTrek/atse/internal/util"
@@ -38,6 +39,9 @@ Examples:
 }
 
 func runGraph(cmd *cobra.Command, args []string) error {
+	startTime := time.Now()
+	startMem := captureMemoryStats()
+
 	symbol := args[0]
 	path := "."
 	if len(args) > 1 {
@@ -83,15 +87,29 @@ func runGraph(cmd *cobra.Command, args []string) error {
 	// Format and output
 	formatted := captureGraph(graph, verboseFlag)
 
-	logMetrics(MetricsLogConfig{
-		Enabled:    logMetricsFlag,
-		LogFile:    metricsLogFile,
-		TokenModel: tokenModelFlag,
-		Command:    "graph",
-		Args:       os.Args[1:],
-		Format:     formatFlag,
-		ExitCode:   0,
-	}, formatted)
+	// Capture peak and end memory
+	peakMem := captureMemoryStats()
+	endMem := peakMem
+
+	metricsConfig := MetricsLogConfig{
+		Enabled:          logMetricsFlag,
+		LogFile:          metricsLogFile,
+		TokenModel:       tokenModelFlag,
+		Command:          "graph",
+		Args:             os.Args[1:],
+		Format:           formatFlag,
+		ExitCode:         0,
+		StartTime:        startTime,
+		EndTime:          time.Now(),
+		StartMemoryBytes: startMem,
+		PeakMemoryBytes:  peakMem,
+		EndMemoryBytes:   endMem,
+		FilesProcessed:   len(files),
+		ResultsCount:     len(graph.Nodes),
+	}
+
+	logMetrics(metricsConfig, formatted)
+	logBenchmark(metricsConfig, formatted)
 
 	fmt.Print(formatted)
 

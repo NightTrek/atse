@@ -24,6 +24,12 @@ This rule provides comprehensive guidelines for AI agents using the ATSE (Agent 
 - `--include <pattern>` - Include file patterns (e.g., "*.ts")
 - `--exclude <pattern>` - Exclude file patterns (e.g., "*.test.ts")
 
+**Performance Monitoring Flags:**
+- `--benchmark` - Display performance summary to stderr (duration, memory, files processed, results count, tokens)
+- `--log-metrics` - Log performance metrics to JSONL file for historical tracking
+- `--metrics-log-file <path>` - Custom path for metrics log (default: benchmark/results/raw/token_metrics.jsonl)
+- `--token-model <model>` - Token counting model name (default: gpt-4o)
+
 ## Recommended workflow
 
 **Step 1: Discovery (search)**
@@ -115,6 +121,143 @@ Commands:
 3. atse graph "UserService" ./src --bidirectional --depth 2
 ```
 
+## Performance monitoring and benchmarking
+
+**NEW: Performance Tracking (Added 2025-11-15)**
+
+ATSE now includes comprehensive performance monitoring to help you benchmark command execution and track improvements over time.
+
+### Using --benchmark flag
+
+The `--benchmark` flag displays a beautiful performance summary to stderr without interfering with stdout output:
+
+```bash
+atse graph AuthService ./src --benchmark
+```
+
+**Output:**
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚡ Performance Benchmark
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Command:          graph
+Duration:         1.247s
+Memory (Start):   12.3 MB
+Memory (Peak):    52.1 MB
+Memory (End):     45.3 MB
+Files Processed:  127
+Results Found:    23
+Output Tokens:    42 (gpt-4o)
+Output Chars:     145
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+**Key Metrics Tracked:**
+- **Duration**: Execution time in seconds (ms precision)
+- **Memory Usage**: Start, peak, and end memory in MB
+- **Files Processed**: Number of files analyzed
+- **Results Found**: Number of symbols/matches returned
+- **Output Tokens**: Token count for LLM context sizing
+- **Output Chars**: Character count
+
+### Using --log-metrics flag
+
+The `--log-metrics` flag appends performance data to a JSONL file for historical analysis:
+
+```bash
+atse graph AuthService ./src --log-metrics
+```
+
+**JSONL Entry Format:**
+```json
+{
+  "timestamp": "2025-11-15T08:10:29.296742Z",
+  "command": "graph",
+  "args": ["graph", "AuthService", "./src"],
+  "exit_code": 0,
+  "execution_duration_ms": 1247,
+  "memory_start_mb": 12.3,
+  "memory_peak_mb": 52.1,
+  "memory_end_mb": 45.3,
+  "files_processed": 127,
+  "results_count": 23,
+  "output_token_count": 42,
+  "output_char_count": 145,
+  "model": "gpt-4o",
+  "output_format": "text",
+  "version": "0.1.0"
+}
+```
+
+### Combined Usage
+
+Use both flags together for immediate feedback and historical tracking:
+
+```bash
+atse graph AuthService ./src --benchmark --log-metrics
+```
+
+### Benchmarking Workflow
+
+**For comparing command performance:**
+```bash
+# Benchmark different depth settings
+atse graph AuthService ./src --depth 1 --benchmark
+atse graph AuthService ./src --depth 2 --benchmark
+atse graph AuthService ./src --depth 3 --benchmark
+
+# Compare BFS vs DFS traversal
+atse graph AuthService ./src --mode bfs --benchmark
+atse graph AuthService ./src --mode dfs --benchmark
+```
+
+**For tracking improvements over time:**
+```bash
+# Log metrics before optimization
+atse graph AuthService ./src --log-metrics
+
+# ... make code improvements ...
+
+# Log metrics after optimization
+atse graph AuthService ./src --log-metrics
+
+# Analyze the JSONL file to compare
+jq 'select(.command=="graph") | {duration: .execution_duration_ms, memory: .memory_peak_mb}' \
+  benchmark/results/raw/token_metrics.jsonl
+```
+
+### AI Agent Recommendations
+
+When using ATSE as an AI agent:
+
+1. **Use --benchmark for immediate insight**: When exploring a codebase, add `--benchmark` to understand command performance and adjust parameters accordingly
+2. **Monitor memory usage**: If memory usage is high (>100 MB), reduce `--depth` or scope to specific directories
+3. **Track token counts**: Use token count to estimate LLM context window usage before sending results
+4. **Compare alternatives**: Benchmark different approaches (e.g., search vs. graph) to find the most efficient solution
+
+### Performance Analysis Examples
+
+**Analyzing slow commands:**
+```bash
+# If a graph command is slow, reduce depth
+atse graph LargeService ./src --depth 1 --benchmark  # Try depth 1 first
+
+# Or scope to specific files
+atse graph LargeService ./src --include "*.ts" --exclude "*.test.*" --benchmark
+```
+
+**Tracking optimization impact:**
+```bash
+# Before optimization
+atse search authenticate ./src --log-metrics --benchmark
+
+# After adding indexes or caching
+atse search authenticate ./src --log-metrics --benchmark
+
+# Compare results
+tail -2 benchmark/results/raw/token_metrics.jsonl | jq .execution_duration_ms
+```
+
 ## Performance optimization tips
 
 **For large codebases (10,000+ files):**
@@ -198,6 +341,17 @@ When you discover a pattern that works particularly well or avoid a pitfall, add
 - search command with --limit 5-10 is perfect for initial exploration
 - extract command requires modest depth (1-2) to avoid extremely large outputs
 - Always scope large codebase analysis to specific directories when possible
+
+### 2025-11-15 - Performance Monitoring System Added
+**Context**: Added comprehensive performance monitoring to track execution time, memory usage, and workload metrics
+**Pattern**: Using `--benchmark` flag provides immediate performance feedback; `--log-metrics` enables historical tracking
+**Result**: Can now benchmark command performance and identify optimization opportunities
+**Recommendation**:
+- Always use `--benchmark` when testing different parameter combinations (depth, mode, filters)
+- Use `--log-metrics` to track performance improvements over time
+- Monitor memory peak to detect when commands might timeout or use excessive resources
+- Token counts help estimate LLM context window usage before sending large outputs
+- Fast commands (<100ms) are ideal for iterative exploration; slower commands (>1s) may need parameter tuning
 
 ### [Add your learnings below]
 

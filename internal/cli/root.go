@@ -20,6 +20,7 @@ var (
 	logMetricsFlag bool
 	metricsLogFile string
 	tokenModelFlag string
+	benchmarkFlag  bool
 )
 
 var rootCmd = &cobra.Command{
@@ -56,6 +57,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&logMetricsFlag, "log-metrics", false, "Log command output token metrics to a JSONL file")
 	rootCmd.PersistentFlags().StringVar(&metricsLogFile, "metrics-log-file", "benchmark/results/raw/token_metrics.jsonl", "Path to append metrics logs (JSONL)")
 	rootCmd.PersistentFlags().StringVar(&tokenModelFlag, "token-model", "gpt-4o", "Model name used for token counting (for reference only)")
+	rootCmd.PersistentFlags().BoolVar(&benchmarkFlag, "benchmark", false, "Display performance benchmark summary to stderr")
 }
 
 // Execute runs the root command

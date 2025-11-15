@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/NightTrek/atse/internal/parser"
 	"github.com/NightTrek/atse/internal/util"
@@ -35,6 +36,9 @@ Examples:
 }
 
 func runExtract(cmd *cobra.Command, args []string) error {
+	startTime := time.Now()
+	startMem := captureMemoryStats()
+
 	symbol := args[0]
 	path := "."
 	if len(args) > 1 {
@@ -86,15 +90,29 @@ func runExtract(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Writing to %s...\n", outputFileFlag)
 	}
 
-	logMetrics(MetricsLogConfig{
-		Enabled:    logMetricsFlag,
-		LogFile:    metricsLogFile,
-		TokenModel: tokenModelFlag,
-		Command:    "extract",
-		Args:       os.Args[1:],
-		Format:     formatFlag,
-		ExitCode:   0,
-	}, extractedCode)
+	// Capture peak and end memory
+	peakMem := captureMemoryStats()
+	endMem := peakMem
+
+	metricsConfig := MetricsLogConfig{
+		Enabled:          logMetricsFlag,
+		LogFile:          metricsLogFile,
+		TokenModel:       tokenModelFlag,
+		Command:          "extract",
+		Args:             os.Args[1:],
+		Format:           formatFlag,
+		ExitCode:         0,
+		StartTime:        startTime,
+		EndTime:          time.Now(),
+		StartMemoryBytes: startMem,
+		PeakMemoryBytes:  peakMem,
+		EndMemoryBytes:   endMem,
+		FilesProcessed:   len(files),
+		ResultsCount:     len(graph.Nodes),
+	}
+
+	logMetrics(metricsConfig, extractedCode)
+	logBenchmark(metricsConfig, extractedCode)
 
 	// Print to stdout
 	fmt.Print(extractedCode)

@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/NightTrek/atse/internal/output"
 	"github.com/NightTrek/atse/internal/parser"
@@ -29,6 +30,9 @@ Examples:
 }
 
 func runListFns(args []string) error {
+	startTime := time.Now()
+	startMem := captureMemoryStats()
+
 	path := "."
 	if len(args) > 0 {
 		path = args[0]
@@ -48,6 +52,7 @@ func runListFns(args []string) error {
 	// Create parser manager
 	mgr := parser.New()
 	var results []output.Result
+	filesProcessed := 0
 
 	// Process each file
 	for _, file := range files {
@@ -76,20 +81,35 @@ func runListFns(args []string) error {
 			}
 			results = append(results, output.NodeInfoToResult(node, file.Path))
 		}
+		filesProcessed++
 	}
 
 	// Format and print results
 	formatted := output.FormatResults(results, output.Format(formatFlag), verboseFlag)
 
-	logMetrics(MetricsLogConfig{
-		Enabled:    logMetricsFlag,
-		LogFile:    metricsLogFile,
-		TokenModel: tokenModelFlag,
-		Command:    "list-fns",
-		Args:       os.Args[1:],
-		Format:     formatFlag,
-		ExitCode:   0,
-	}, formatted)
+	// Capture peak and end memory
+	peakMem := captureMemoryStats()
+	endMem := peakMem
+
+	metricsConfig := MetricsLogConfig{
+		Enabled:          logMetricsFlag,
+		LogFile:          metricsLogFile,
+		TokenModel:       tokenModelFlag,
+		Command:          "list-fns",
+		Args:             os.Args[1:],
+		Format:           formatFlag,
+		ExitCode:         0,
+		StartTime:        startTime,
+		EndTime:          time.Now(),
+		StartMemoryBytes: startMem,
+		PeakMemoryBytes:  peakMem,
+		EndMemoryBytes:   endMem,
+		FilesProcessed:   filesProcessed,
+		ResultsCount:     len(results),
+	}
+
+	logMetrics(metricsConfig, formatted)
+	logBenchmark(metricsConfig, formatted)
 
 	fmt.Print(formatted)
 
