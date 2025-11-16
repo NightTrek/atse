@@ -11,7 +11,7 @@ before:
 
 builds:
   - id: atse
-    main: ./cmd/atse/main.go
+    main: ./cmd/atse
     binary: atse
     
     # Enable CGO (required for Tree-sitter)
