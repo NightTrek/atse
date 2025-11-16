@@ -1,0 +1,152 @@
+# GoReleaser configuration for ATSE
+# Documentation: https://goreleaser.com
+
+version: 2
+
+before:
+  hooks:
+    # Ensure dependencies are up to date
+    - go mod tidy
+    - go mod download
+
+builds:
+  - id: atse
+    main: ./cmd/atse/main.go
+    binary: atse
+    
+    # Enable CGO (required for Tree-sitter)
+    env:
+      - CGO_ENABLED=1
+    
+    # Version injection via ldflags
+    ldflags:
+      - -s -w
+      - -X github.com/NightTrek/atse/internal/cli.version={{.Version}}
+    
+    # Build for multiple platforms
+    goos:
+      - linux
+      - darwin
+    
+    goarch:
+      - amd64
+      - arm64
+    
+    # Ignore combinations that don't make sense
+    ignore:
+      - goos: windows  # Windows support can be added later if needed
+
+archives:
+  - id: atse-archive
+    format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}-
+      {{- .Version }}-
+      {{- .Os }}-
+      {{- .Arch }}
+    
+    # Files to include in the archive
+    files:
+      - README.md
+      - LICENSE*
+    
+    # Format overrides for specific OS
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - '^ci:'
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: 'New Features'
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: 'Bug Fixes'
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: 'Performance Improvements'
+      regexp: '^.*?perf(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: 'Other Changes'
+      order: 999
+
+release:
+  github:
+    owner: NightTrek
+    name: atse
+  
+  # Create release draft (allows manual review before publishing)
+  draft: false
+  
+  # Mark as prerelease if version contains alpha, beta, rc
+  prerelease: auto
+  
+  # Release name template
+  name_template: "{{.ProjectName}} {{.Version}}"
+  
+  # Footer for release notes
+  footer: |
+    ## Installation
+    
+    ### Homebrew (macOS)
+    ```bash
+    brew tap NightTrek/tap
+    brew install atse
+    ```
+    
+    ### Universal Install Script (macOS/Linux)
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/NightTrek/atse/main/scripts/install.sh | bash
+    ```
+    
+    ### Direct Download
+    Download the appropriate binary for your platform from the assets below.
+
+# Homebrew tap configuration
+brews:
+  - repository:
+      owner: NightTrek
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    
+    # Brew formula details
+    name: atse
+    homepage: https://github.com/NightTrek/atse
+    description: "Agent Tree Search Engine - Tree-sitter powered CLI for code analysis"
+    license: MIT
+    
+    # Installation details
+    install: |
+      bin.install "atse"
+    
+    # Test the installation
+    test: |
+      system "#{bin}/atse", "--version"
+    
+    # Dependencies (if any)
+    # dependencies:
+    #   - name: go
+    #     type: optional
+
+# Announce releases (optional - can be configured later)
+# announce:
+#   twitter:
+#     enabled: false
+#   discord:
+#     enabled: false

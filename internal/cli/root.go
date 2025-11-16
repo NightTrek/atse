@@ -23,6 +23,10 @@ var (
 	benchmarkFlag  bool
 )
 
+// version is the CLI version string. It defaults to "dev" but is overridden at
+// build time via -ldflags (e.g. -X github.com/NightTrek/atse/internal/cli.version=v0.2.0).
+var version = "dev"
+
 var rootCmd = &cobra.Command{
 	Use:   "atse",
 	Short: "Agent Tree Search - A Tree-sitter powered CLI for code analysis",
@@ -40,7 +44,7 @@ Examples:
   atse list-fns ./src/api.ts
   atse deps ./src --format json
   atse context ./src/api.ts:42:10`,
-	Version: "0.1.0",
+	Version: version,
 }
 
 func init() {

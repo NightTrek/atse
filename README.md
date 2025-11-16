@@ -18,6 +18,47 @@ Traditional text-based search tools like `grep` produce many false positives and
 
 ### Installation
 
+Choose the installation method that works best for you:
+
+#### Option 1: Homebrew (macOS - Recommended)
+
+```bash
+brew tap NightTrek/tap
+brew install atse
+```
+
+#### Option 2: Install Script (macOS/Linux - Universal)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/NightTrek/atse/main/scripts/install.sh | bash
+```
+
+This script will:
+- Detect your OS and architecture automatically
+- Download the latest release
+- Install to `/usr/local/bin` (or `~/.local/bin` if no sudo)
+- Automatically add to your PATH
+
+#### Option 3: Direct Download
+
+Download the latest release for your platform:
+
+**macOS:**
+- [Apple Silicon (M1/M2/M3)](https://github.com/NightTrek/atse/releases/latest/download/atse-darwin-arm64.tar.gz)
+- [Intel](https://github.com/NightTrek/atse/releases/latest/download/atse-darwin-amd64.tar.gz)
+
+**Linux:**
+- [ARM64](https://github.com/NightTrek/atse/releases/latest/download/atse-linux-arm64.tar.gz)
+- [x86_64](https://github.com/NightTrek/atse/releases/latest/download/atse-linux-amd64.tar.gz)
+
+```bash
+# Extract and install
+tar -xzf atse-*.tar.gz
+sudo mv atse /usr/local/bin/
+```
+
+#### Option 4: Build from Source
+
 ```bash
 # Clone the repository
 git clone https://github.com/NightTrek/atse.git
@@ -36,13 +77,24 @@ CGO_ENABLED=1 go build -ldflags="-s -w" -o atse ./cmd/atse/main.go
 
 **Note:** ATSE requires CGO to be enabled for Tree-sitter bindings. The Makefile handles this automatically.
 
-#### Make Commands
+#### Make Commands (for developers)
 
 ```bash
-make build    # Build the binary
-make clean    # Clean build artifacts
-make check    # Build and run quick tests
-make install  # Install to $GOPATH/bin
+make build          # Build the binary
+make clean          # Clean build artifacts
+make check          # Build and run quick tests
+make install        # Install to $GOPATH/bin
+make release-local  # Test release build locally
+make release-check  # Verify release configuration
+```
+
+### Verify Installation
+
+After installation, verify it works:
+
+```bash
+atse --version
+atse --help
 ```
 
 ### Basic Usage
