@@ -25,12 +25,10 @@ builds:
     
     # Build for multiple platforms
     goos:
-      - linux
-      - darwin
+      - "{{.Os}}"
     
     goarch:
-      - amd64
-      - arm64
+      - "{{.Arch}}"
     
     # Ignore combinations that don't make sense
     ignore:
