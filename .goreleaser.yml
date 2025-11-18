@@ -14,15 +14,19 @@ builds:
     main: cmd/atse/main.go
     binary: atse
     env:
-      - CGO_ENABLED=1
+      - CGO_ENABLED=0
     ldflags:
       - -s -w
       - -X github.com/NightTrek/atse/internal/cli.version={{.Version}}
     goos:
       - linux
+      - darwin
     goarch:
       - amd64
       - arm64
+    ignore:
+      - goos: darwin
+        goarch: amd64
 
 archives:
   - id: atse-archive
@@ -46,9 +50,6 @@ archives:
 checksum:
   name_template: 'checksums.txt'
   algorithm: sha256
-
-snapshot:
-  name_template: "{{ incpatch .Version }}-next"
 
 changelog:
   sort: asc
@@ -106,31 +107,27 @@ release:
     ### Direct Download
     Download the appropriate binary for your platform from the assets below.
 
-# Homebrew tap configuration
-brews:
-  - repository:
-      owner: NightTrek
-      name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    
-    # Brew formula details
-    name: atse
-    homepage: https://github.com/NightTrek/atse
-    description: "Agent Tree Search Engine - Tree-sitter powered CLI for code analysis"
-    license: MIT
-    
-    # Installation details
-    install: |
-      bin.install "atse"
-    
-    # Test the installation
-    test: |
-      system "#{bin}/atse", "--version"
-    
-    # Dependencies (if any)
-    # dependencies:
-    #   - name: go
-    #     type: optional
+# Homebrew tap configuration - DISABLED for automatic patch releases
+# Uncomment and configure HOMEBREW_TAP_GITHUB_TOKEN to enable automatic updates
+# brews:
+#   - repository:
+#       owner: NightTrek
+#       name: homebrew-tap
+#       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+#     
+#     # Brew formula details
+#     name: atse
+#     homepage: https://github.com/NightTrek/atse
+#     description: "Agent Tree Search Engine - Tree-sitter powered CLI for code analysis"
+#     license: MIT
+#     
+#     # Installation details
+#     install: |
+#       bin.install "atse"
+#     
+#     # Test the installation
+#     test: |
+#       system "#{bin}/atse", "--version"
 
 # Announce releases (optional - can be configured later)
 # announce:

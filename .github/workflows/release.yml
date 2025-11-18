@@ -1,27 +1,44 @@
-name: Release
+name: Release on Main Push
 
 on:
   push:
     branches:
-      - main  # Trigger on every push to main branch
-    tags:
-      - 'v*.*.*'  # Also trigger on version tags like v0.1.0, v1.2.3, etc.
+      - main
 
 permissions:
-  contents: write  # Required for creating releases
-  packages: write  # Required for publishing packages
+  contents: write
+  packages: write
 
 jobs:
-  goreleaser:
+  release:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history for changelog generation
+          fetch-depth: 0
       
       - name: Fetch all tags
         run: git fetch --force --tags
+      
+      - name: Calculate next version
+        id: version
+        run: |
+          LATEST=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "Previous version: $LATEST"
+          
+          NEW_VERSION=$(echo $LATEST | awk -F. -v OFS=. '{$NF = $NF + 1; print}')
+          echo "New version: $NEW_VERSION"
+          
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "previous=$LATEST" >> $GITHUB_OUTPUT
+      
+      - name: Create and push tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a ${{ steps.version.outputs.version }} -m "Release ${{ steps.version.outputs.version }}"
+          git push origin ${{ steps.version.outputs.version }}
       
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -35,28 +52,17 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       
-      - name: Install cross-compilation tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
-      - name: Run GoReleaser for Tags
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          distribution: goreleaser
-          version: latest
-          args: release --clean --skip=validate
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
-
-      - name: Run GoReleaser for Main (Snapshot)
-        if: github.ref == 'refs/heads/main'
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          distribution: goreleaser
-          version: latest
-          args: release --snapshot --clean --skip=publish,validate
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Release Summary
+        run: |
+          echo "🎉 Release ${{ steps.version.outputs.version }} created successfully!"
+          echo "📦 Previous version: ${{ steps.version.outputs.previous }}"
+          echo "🔗 View release: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.version }}"
