@@ -25,10 +25,10 @@ builds:
     
     # Build for multiple platforms
     goos:
-      - "{{.Os}}"
+      - {{.Os}}
     
     goarch:
-      - "{{.Arch}}"
+      - {{.Arch}}
     
     # Ignore combinations that don't make sense
     ignore:
