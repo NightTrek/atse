@@ -24,11 +24,7 @@ builds:
       - -X github.com/NightTrek/atse/internal/cli.version={{.Version}}
     
     # Build for multiple platforms
-    goos:
-      - {{.Os}}
-    
-    goarch:
-      - {{.Arch}}
+
     
     # Ignore combinations that don't make sense
     ignore:
