@@ -115,12 +115,17 @@ download_binary() {
     print_info "Extracting archive..."
     tar -xzf "${archive_file}" -C "${tmp_dir}"
     
-    if [ ! -f "${tmp_dir}/${BINARY_NAME}" ]; then
-        print_error "Binary not found in archive"
+    # The binary in the archive is named atse-{OS}-{ARCH}, we need to find and rename it
+    local extracted_binary="${tmp_dir}/${BINARY_NAME}-${OS}-${ARCH}"
+    
+    if [ ! -f "${extracted_binary}" ]; then
+        print_error "Binary not found in archive (expected: ${BINARY_NAME}-${OS}-${ARCH})"
         rm -rf "${tmp_dir}"
         exit 1
     fi
     
+    # Rename to simple binary name
+    mv "${extracted_binary}" "${tmp_dir}/${BINARY_NAME}"
     BINARY_PATH="${tmp_dir}/${BINARY_NAME}"
     print_success "Extracted successfully"
 }
