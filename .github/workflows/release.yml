@@ -10,8 +10,11 @@ permissions:
   packages: write
 
 jobs:
-  release:
+  prepare:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      previous: ${{ steps.version.outputs.previous }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -39,6 +42,15 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -a ${{ steps.version.outputs.version }} -m "Release ${{ steps.version.outputs.version }}"
           git push origin ${{ steps.version.outputs.version }}
+
+  build-linux:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.version }}
       
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -49,20 +61,139 @@ jobs:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
       
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Install cross-compilation tools for ARM64
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
       
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+      - name: Build Linux AMD64
+        env:
+          CGO_ENABLED: 1
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          go build -ldflags="-s -w -X github.com/NightTrek/atse/internal/cli.version=${{ needs.prepare.outputs.version }}" -o dist/atse-linux-amd64 ./cmd/atse
+      
+      - name: Build Linux ARM64
+        env:
+          CGO_ENABLED: 1
+          GOOS: linux
+          GOARCH: arm64
+          CC: aarch64-linux-gnu-gcc
+          CXX: aarch64-linux-gnu-g++
+        run: |
+          go build -ldflags="-s -w -X github.com/NightTrek/atse/internal/cli.version=${{ needs.prepare.outputs.version }}" -o dist/atse-linux-arm64 ./cmd/atse
+      
+      - name: Create Linux archives
+        run: |
+          cd dist
+          tar czf atse-${{ needs.prepare.outputs.version }}-linux-amd64.tar.gz atse-linux-amd64
+          tar czf atse-${{ needs.prepare.outputs.version }}-linux-arm64.tar.gz atse-linux-arm64
+      
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
         with:
-          distribution: goreleaser
-          version: latest
-          args: release --clean
+          name: linux-builds
+          path: dist/*.tar.gz
+
+  build-macos:
+    needs: prepare
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.version }}
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+      
+      - name: Build macOS ARM64
+        env:
+          CGO_ENABLED: 1
+          GOOS: darwin
+          GOARCH: arm64
+        run: |
+          go build -ldflags="-s -w -X github.com/NightTrek/atse/internal/cli.version=${{ needs.prepare.outputs.version }}" -o dist/atse-darwin-arm64 ./cmd/atse
+      
+      - name: Create macOS archive
+        run: |
+          cd dist
+          tar czf atse-${{ needs.prepare.outputs.version }}-darwin-arm64.tar.gz atse-darwin-arm64
+      
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-builds
+          path: dist/*.tar.gz
+
+  create-release:
+    needs: [prepare, build-linux, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.version }}
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          cp artifacts/linux-builds/* release-assets/
+          cp artifacts/macos-builds/* release-assets/
+          cd release-assets
+          sha256sum *.tar.gz > checksums.txt
+      
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREVIOUS="${{ needs.prepare.outputs.previous }}"
+          if [ "$PREVIOUS" != "v0.0.0" ]; then
+            CHANGELOG=$(git log ${PREVIOUS}..HEAD --pretty=format:"- %s (%h)" --no-merges | grep -v "^- Merge" || echo "- Initial release")
+          else
+            CHANGELOG="- Initial release"
+          fi
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.version }}
+          name: ATSE ${{ needs.prepare.outputs.version }}
+          body: |
+            ## What's Changed
+            
+            ${{ steps.changelog.outputs.changelog }}
+            
+            ## Installation
+            
+            ### Universal Install Script (macOS/Linux)
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/NightTrek/atse/main/scripts/install.sh | bash
+            ```
+            
+            ### Direct Download
+            Download the appropriate binary for your platform from the assets below.
+            
+            **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ needs.prepare.outputs.previous }}...${{ needs.prepare.outputs.version }}
+          files: release-assets/*
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Release Summary
         run: |
-          echo "🎉 Release ${{ steps.version.outputs.version }} created successfully!"
-          echo "📦 Previous version: ${{ steps.version.outputs.previous }}"
-          echo "🔗 View release: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.version }}"
+          echo "🎉 Release ${{ needs.prepare.outputs.version }} created successfully!"
+          echo "📦 Previous version: ${{ needs.prepare.outputs.previous }}"
+          echo "🔗 View release: https://github.com/${{ github.repository }}/releases/tag/${{ needs.prepare.outputs.version }}"
