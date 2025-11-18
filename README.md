@@ -20,14 +20,9 @@ Traditional text-based search tools like `grep` produce many false positives and
 
 Choose the installation method that works best for you:
 
-#### Option 1: Homebrew (macOS - Recommended)
 
-```bash
-brew tap NightTrek/tap
-brew install atse
-```
 
-#### Option 2: Install Script (macOS/Linux - Universal)
+#### Option 1: Install Script (macOS/Linux - Universal)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/NightTrek/atse/main/scripts/install.sh | bash
@@ -39,7 +34,7 @@ This script will:
 - Install to `/usr/local/bin` (or `~/.local/bin` if no sudo)
 - Automatically add to your PATH
 
-#### Option 3: Direct Download
+#### Option 2: Direct Download
 
 Download the latest release for your platform:
 
@@ -57,7 +52,7 @@ tar -xzf atse-*.tar.gz
 sudo mv atse /usr/local/bin/
 ```
 
-#### Option 4: Build from Source
+#### Option 3: Build from Source
 
 ```bash
 # Clone the repository
