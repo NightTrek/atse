@@ -13,22 +13,16 @@ builds:
   - id: atse
     main: cmd/atse/main.go
     binary: atse
-    
-    # Enable CGO (required for Tree-sitter)
     env:
       - CGO_ENABLED=1
-    
-    # Version injection via ldflags
     ldflags:
       - -s -w
       - -X github.com/NightTrek/atse/internal/cli.version={{.Version}}
-    
-    # Build for multiple platforms
-
-    
-    # Ignore combinations that don't make sense
-    ignore:
-      - goos: windows  # Windows support can be added later if needed
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
 
 archives:
   - id: atse-archive
