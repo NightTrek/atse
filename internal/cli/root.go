@@ -9,13 +9,14 @@ import (
 
 var (
 	// Global flags
-	formatFlag    string
-	verboseFlag   bool
-	recursiveFlag bool
-	includeFlag   []string
-	excludeFlag   []string
-	limitFlag     int
-	noCacheFlag   bool
+	formatFlag         string
+	verboseFlag        bool
+	recursiveFlag      bool
+	includeFlag        []string
+	excludeFlag        []string
+	limitFlag          int
+	noCacheFlag        bool
+	productionOnlyFlag bool
 
 	logMetricsFlag bool
 	metricsLogFile string
@@ -54,6 +55,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&recursiveFlag, "recursive", "r", true, "Recursively search directories")
 	rootCmd.PersistentFlags().StringSliceVar(&includeFlag, "include", []string{}, "Include file patterns (e.g., '*.ts')")
 	rootCmd.PersistentFlags().StringSliceVar(&excludeFlag, "exclude", []string{}, "Exclude file patterns (e.g., '*.test.ts')")
+	rootCmd.PersistentFlags().BoolVar(&productionOnlyFlag, "production-only", false, "Exclude test, mock, and generated files")
 	rootCmd.PersistentFlags().IntVar(&limitFlag, "limit", 0, "Limit number of results (0 = no limit)")
 	rootCmd.PersistentFlags().BoolVar(&noCacheFlag, "no-cache", false, "Bypass parse tree cache")
 
@@ -66,8 +68,30 @@ func init() {
 
 // Execute runs the root command
 func Execute() {
+	// Apply smart defaults before execution
+	cobra.OnInitialize(applySmartDefaults)
+
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+}
+
+func applySmartDefaults() {
+	// If production-only is set, add standard exclusion patterns
+	if productionOnlyFlag {
+		defaults := []string{
+			"*_test.go",
+			"*.test.ts",
+			"*.test.js",
+			"*.spec.ts",
+			"*.spec.js",
+			"*generated*",
+			"*proto*",
+			"*mock*",
+			"*__tests__*",
+			"*test*", // Be careful with this one, might match "latest.go"
+		}
+		excludeFlag = append(excludeFlag, defaults...)
 	}
 }

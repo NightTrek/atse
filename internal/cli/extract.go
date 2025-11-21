@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NightTrek/atse/internal/index"
 	"github.com/NightTrek/atse/internal/parser"
 	"github.com/NightTrek/atse/internal/util"
 	sitter "github.com/smacker/go-tree-sitter"
@@ -59,24 +60,35 @@ func runExtract(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Build the graph first to discover all components
-	graph := NewFeatureGraph(symbol, extractDepthFlag)
+	// Get or load symbol index
+	idx, err := mgr.GetOrLoadIndex(path, files, verboseFlag)
+	if err != nil {
+		return fmt.Errorf("failed to get symbol index: %w", err)
+	}
 
-	// Find the entry point symbol
-	entryPoint := findEntryPoint(mgr, files, symbol)
-	if entryPoint == nil {
+	// Find entry point
+	entryNodes := idx.FindSymbol(symbol)
+	if len(entryNodes) == 0 {
 		fmt.Printf("Symbol '%s' not found in codebase.\n", symbol)
 		return nil
 	}
 
+	entryPoint := entryNodes[0]
+	entryPoint.Level = 0
+
+	// Build graph
+	graph := NewFeatureGraph(symbol, extractDepthFlag)
 	graph.EntryPoint = entryPoint
 
-	// Traverse to discover all components
+	// Use call connection finder for extraction (matches original behavior)
+	finders := []ConnectionFinder{NewCallsConnectionFinder()}
+
+	// Traverse
 	switch extractModeFlag {
 	case "bfs":
-		traverseBFS(mgr, files, graph, false)
+		traverseBFSWithIndex(idx, graph, finders, 0)
 	case "dfs":
-		traverseDFS(mgr, files, graph, false)
+		traverseDFSWithIndex(idx, graph, finders, 0)
 	default:
 		return fmt.Errorf("invalid mode: %s (use 'bfs' or 'dfs')", extractModeFlag)
 	}
@@ -131,7 +143,7 @@ func extractSourceCode(mgr *parser.Manager, graph *FeatureGraph) string {
 		countUniqueFiles(graph)))
 
 	// Group nodes by level
-	levelNodes := make(map[int][]*GraphNode)
+	levelNodes := make(map[int][]*index.GraphNode)
 	for _, node := range graph.Nodes {
 		levelNodes[node.Level] = append(levelNodes[node.Level], node)
 	}
@@ -150,7 +162,7 @@ func extractSourceCode(mgr *parser.Manager, graph *FeatureGraph) string {
 		}
 
 		// Group by file
-		fileNodes := make(map[string][]*GraphNode)
+		fileNodes := make(map[string][]*index.GraphNode)
 		for _, node := range nodes {
 			fileNodes[node.FilePath] = append(fileNodes[node.FilePath], node)
 		}
@@ -191,7 +203,7 @@ func extractSourceCode(mgr *parser.Manager, graph *FeatureGraph) string {
 }
 
 // extractSymbolSource extracts the source code for a specific symbol
-func extractSymbolSource(tree *sitter.Tree, content []byte, node *GraphNode) string {
+func extractSymbolSource(tree *sitter.Tree, content []byte, node *index.GraphNode) string {
 	// Find the node in the tree that matches our symbol
 	root := tree.RootNode()
 

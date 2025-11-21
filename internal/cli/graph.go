@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NightTrek/atse/internal/index"
 	"github.com/NightTrek/atse/internal/parser"
 	"github.com/NightTrek/atse/internal/util"
-	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/spf13/cobra"
 )
 
@@ -68,10 +68,10 @@ func runGraph(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Collected %d files to analyze\n", len(files))
 	}
 
-	// BUILD SYMBOL INDEX (NEW!)
-	index, err := buildSymbolIndex(mgr, files, verboseFlag)
+	// Get or load symbol index
+	idx, err := mgr.GetOrLoadIndex(path, files, verboseFlag)
 	if err != nil {
-		return fmt.Errorf("failed to build symbol index: %w", err)
+		return fmt.Errorf("failed to get symbol index: %w", err)
 	}
 
 	// Find the entry point using the index (O(1) lookup!)
@@ -79,7 +79,7 @@ func runGraph(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Finding entry point: %s...\n", symbol)
 	}
 
-	entryNodes := index.FindSymbol(symbol)
+	entryNodes := idx.FindSymbol(symbol)
 	if len(entryNodes) == 0 {
 		fmt.Printf("Symbol '%s' not found in codebase.\n", symbol)
 		return nil
@@ -117,9 +117,9 @@ func runGraph(cmd *cobra.Command, args []string) error {
 	// Traverse based on mode (uses index + connection finders)
 	switch graphModeFlag {
 	case "bfs":
-		traverseBFSWithIndex(index, graph, finders, maxSymbolsFlag)
+		traverseBFSWithIndex(idx, graph, finders, maxSymbolsFlag)
 	case "dfs":
-		traverseDFSWithIndex(index, graph, finders, maxSymbolsFlag)
+		traverseDFSWithIndex(idx, graph, finders, maxSymbolsFlag)
 	default:
 		return fmt.Errorf("invalid mode: %s (use 'bfs' or 'dfs')", graphModeFlag)
 	}
@@ -160,82 +160,29 @@ func runGraph(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// GraphNode represents a node in the feature graph
-type GraphNode struct {
-	Symbol   string
-	Type     string // "function", "class", "method"
-	FilePath string
-	Line     uint32
-	Level    int // Distance from entry point
-}
-
 // FeatureGraph represents the discovered feature boundary
 type FeatureGraph struct {
-	EntryPoint   *GraphNode
-	Nodes        map[string]*GraphNode // Key: symbol name
-	Dependencies map[string][]string   // Key: from symbol, Value: to symbols
-	Dependents   map[string][]string   // Key: to symbol, Value: from symbols
+	EntryPoint   *index.GraphNode
+	Nodes        map[string]*index.GraphNode // Key: symbol name
+	Dependencies map[string][]string         // Key: from symbol, Value: to symbols
+	Dependents   map[string][]string         // Key: to symbol, Value: from symbols
 	MaxDepth     int
 }
 
 // NewFeatureGraph creates a new feature graph
 func NewFeatureGraph(entrySymbol string, maxDepth int) *FeatureGraph {
 	return &FeatureGraph{
-		Nodes:        make(map[string]*GraphNode),
+		Nodes:        make(map[string]*index.GraphNode),
 		Dependencies: make(map[string][]string),
 		Dependents:   make(map[string][]string),
 		MaxDepth:     maxDepth,
 	}
 }
 
-// findEntryPoint locates the starting symbol in the codebase
-func findEntryPoint(mgr *parser.Manager, files []util.FileMatch, symbol string) *GraphNode {
-	for _, file := range files {
-		tree, err := mgr.ParseFile(file.Path)
-		if err != nil {
-			continue
-		}
-
-		content, err := mgr.GetContent(file.Path)
-		if err != nil {
-			continue
-		}
-
-		langName, err := mgr.InferLanguage(file.Path)
-		if err != nil {
-			continue
-		}
-
-		// Search for the symbol
-		queries := buildSymbolQueries(langName)
-		for symbolType, queryString := range queries {
-			results, err := mgr.Query(tree, queryString, langName, content)
-			if err != nil {
-				continue
-			}
-
-			for _, result := range results {
-				name := strings.TrimSpace(result.Text)
-				if name == symbol {
-					return &GraphNode{
-						Symbol:   name,
-						Type:     symbolType,
-						FilePath: file.Path,
-						Line:     result.StartPosition.Row,
-						Level:    0,
-					}
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
 // traverseBFSWithIndex performs BFS using the symbol index
-func traverseBFSWithIndex(index *SymbolIndex, graph *FeatureGraph, finders []ConnectionFinder, maxSymbols int) {
+func traverseBFSWithIndex(idx *index.SymbolIndex, graph *FeatureGraph, finders []ConnectionFinder, maxSymbols int) {
 	visited := make(map[string]bool)
-	queue := []*GraphNode{graph.EntryPoint}
+	queue := []*index.GraphNode{graph.EntryPoint}
 	visited[graph.EntryPoint.Symbol] = true
 	graph.Nodes[graph.EntryPoint.Symbol] = graph.EntryPoint
 
@@ -266,7 +213,7 @@ func traverseBFSWithIndex(index *SymbolIndex, graph *FeatureGraph, finders []Con
 
 		// Find connections using all finders
 		for _, finder := range finders {
-			connections := finder.FindConnections(current, index)
+			connections := finder.FindConnections(current, idx)
 
 			for _, conn := range connections {
 				if !visited[conn.To.Symbol] {
@@ -284,7 +231,7 @@ func traverseBFSWithIndex(index *SymbolIndex, graph *FeatureGraph, finders []Con
 }
 
 // traverseDFSWithIndex performs DFS using the symbol index
-func traverseDFSWithIndex(index *SymbolIndex, graph *FeatureGraph, finders []ConnectionFinder, maxSymbols int) {
+func traverseDFSWithIndex(idx *index.SymbolIndex, graph *FeatureGraph, finders []ConnectionFinder, maxSymbols int) {
 	visited := make(map[string]bool)
 	graph.Nodes[graph.EntryPoint.Symbol] = graph.EntryPoint
 
@@ -292,8 +239,8 @@ func traverseDFSWithIndex(index *SymbolIndex, graph *FeatureGraph, finders []Con
 		fmt.Fprintf(os.Stderr, "\nStarting DFS from: %s\n", graph.EntryPoint.Symbol)
 	}
 
-	var dfs func(*GraphNode)
-	dfs = func(current *GraphNode) {
+	var dfs func(*index.GraphNode)
+	dfs = func(current *index.GraphNode) {
 		visited[current.Symbol] = true
 
 		// Check max symbols limit
@@ -315,7 +262,7 @@ func traverseDFSWithIndex(index *SymbolIndex, graph *FeatureGraph, finders []Con
 
 		// Find connections using all finders
 		for _, finder := range finders {
-			connections := finder.FindConnections(current, index)
+			connections := finder.FindConnections(current, idx)
 
 			for _, conn := range connections {
 				if !visited[conn.To.Symbol] {
@@ -331,283 +278,6 @@ func traverseDFSWithIndex(index *SymbolIndex, graph *FeatureGraph, finders []Con
 	dfs(graph.EntryPoint)
 }
 
-// traverseBFS performs breadth-first search to discover feature boundaries (OLD - DEPRECATED)
-func traverseBFS(mgr *parser.Manager, files []util.FileMatch, graph *FeatureGraph, bidirectional bool) {
-	visited := make(map[string]bool)
-	queue := []*GraphNode{graph.EntryPoint}
-	visited[graph.EntryPoint.Symbol] = true
-	graph.Nodes[graph.EntryPoint.Symbol] = graph.EntryPoint
-
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-
-		// Stop if we've reached max depth
-		if current.Level >= graph.MaxDepth {
-			continue
-		}
-
-		// Find dependencies (what this symbol calls/uses)
-		deps := findDependencies(mgr, files, current)
-		for _, dep := range deps {
-			if !visited[dep.Symbol] {
-				dep.Level = current.Level + 1
-				visited[dep.Symbol] = true
-				graph.Nodes[dep.Symbol] = dep
-				queue = append(queue, dep)
-			}
-
-			// Record edge
-			graph.Dependencies[current.Symbol] = append(graph.Dependencies[current.Symbol], dep.Symbol)
-		}
-
-		// Find dependents (what calls/uses this symbol) if bidirectional
-		if bidirectional {
-			dependents := findDependents(mgr, files, current)
-			for _, dependent := range dependents {
-				if !visited[dependent.Symbol] {
-					dependent.Level = current.Level + 1
-					visited[dependent.Symbol] = true
-					graph.Nodes[dependent.Symbol] = dependent
-					queue = append(queue, dependent)
-				}
-
-				// Record edge
-				graph.Dependents[current.Symbol] = append(graph.Dependents[current.Symbol], dependent.Symbol)
-			}
-		}
-	}
-}
-
-// traverseDFS performs depth-first search to follow call chains
-func traverseDFS(mgr *parser.Manager, files []util.FileMatch, graph *FeatureGraph, bidirectional bool) {
-	visited := make(map[string]bool)
-	graph.Nodes[graph.EntryPoint.Symbol] = graph.EntryPoint
-
-	var dfs func(*GraphNode)
-	dfs = func(current *GraphNode) {
-		visited[current.Symbol] = true
-
-		// Stop if we've reached max depth
-		if current.Level >= graph.MaxDepth {
-			return
-		}
-
-		// Find dependencies
-		deps := findDependencies(mgr, files, current)
-		for _, dep := range deps {
-			if !visited[dep.Symbol] {
-				dep.Level = current.Level + 1
-				graph.Nodes[dep.Symbol] = dep
-				graph.Dependencies[current.Symbol] = append(graph.Dependencies[current.Symbol], dep.Symbol)
-				dfs(dep)
-			}
-		}
-
-		// Find dependents if bidirectional
-		if bidirectional {
-			dependents := findDependents(mgr, files, current)
-			for _, dependent := range dependents {
-				if !visited[dependent.Symbol] {
-					dependent.Level = current.Level + 1
-					graph.Nodes[dependent.Symbol] = dependent
-					graph.Dependents[current.Symbol] = append(graph.Dependents[current.Symbol], dependent.Symbol)
-					dfs(dependent)
-				}
-			}
-		}
-	}
-
-	dfs(graph.EntryPoint)
-}
-
-// findDependencies finds what a symbol depends on (calls, imports, etc.)
-func findDependencies(mgr *parser.Manager, files []util.FileMatch, node *GraphNode) []*GraphNode {
-	var deps []*GraphNode
-
-	// Parse the file containing this symbol
-	tree, err := mgr.ParseFile(node.FilePath)
-	if err != nil {
-		return deps
-	}
-
-	content, err := mgr.GetContent(node.FilePath)
-	if err != nil {
-		return deps
-	}
-
-	langName, err := mgr.InferLanguage(node.FilePath)
-	if err != nil {
-		return deps
-	}
-
-	// Find call expressions in this file
-	callQuery := buildCallQuery(langName)
-	if callQuery == "" {
-		return deps
-	}
-
-	results, err := mgr.Query(tree, callQuery, langName, content)
-	if err != nil {
-		return deps
-	}
-
-	// Extract called function names
-	for _, result := range results {
-		calledName := strings.TrimSpace(result.Text)
-		if calledName != "" && calledName != node.Symbol {
-			// Try to find this symbol in the codebase
-			depNode := findSymbolInFiles(mgr, files, calledName)
-			if depNode != nil {
-				deps = append(deps, depNode)
-			}
-		}
-	}
-
-	return deps
-}
-
-// findDependents finds what depends on this symbol (what calls it)
-func findDependents(mgr *parser.Manager, files []util.FileMatch, node *GraphNode) []*GraphNode {
-	var dependents []*GraphNode
-
-	// Search all files for calls to this symbol
-	for _, file := range files {
-		tree, err := mgr.ParseFile(file.Path)
-		if err != nil {
-			continue
-		}
-
-		content, err := mgr.GetContent(file.Path)
-		if err != nil {
-			continue
-		}
-
-		langName, err := mgr.InferLanguage(file.Path)
-		if err != nil {
-			continue
-		}
-
-		// Find calls to our symbol
-		callQuery := buildSpecificCallQuery(langName, node.Symbol)
-		if callQuery == "" {
-			continue
-		}
-
-		results, err := mgr.Query(tree, callQuery, langName, content)
-		if err != nil {
-			continue
-		}
-
-		if len(results) > 0 {
-			// This file calls our symbol - find the containing function
-			caller := findContainingFunction(mgr, tree, langName, content, results[0].StartPosition.Row)
-			if caller != nil && caller.Symbol != node.Symbol {
-				dependents = append(dependents, caller)
-			}
-		}
-	}
-
-	return dependents
-}
-
-// findSymbolInFiles searches for a symbol across all files
-func findSymbolInFiles(mgr *parser.Manager, files []util.FileMatch, symbol string) *GraphNode {
-	for _, file := range files {
-		tree, err := mgr.ParseFile(file.Path)
-		if err != nil {
-			continue
-		}
-
-		content, err := mgr.GetContent(file.Path)
-		if err != nil {
-			continue
-		}
-
-		langName, err := mgr.InferLanguage(file.Path)
-		if err != nil {
-			continue
-		}
-
-		queries := buildSymbolQueries(langName)
-		for symbolType, queryString := range queries {
-			results, err := mgr.Query(tree, queryString, langName, content)
-			if err != nil {
-				continue
-			}
-
-			for _, result := range results {
-				name := strings.TrimSpace(result.Text)
-				if name == symbol {
-					return &GraphNode{
-						Symbol:   name,
-						Type:     symbolType,
-						FilePath: file.Path,
-						Line:     result.StartPosition.Row,
-					}
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
-// findContainingFunction finds the function that contains a given line
-func findContainingFunction(mgr *parser.Manager, tree *sitter.Tree, langName string, content []byte, line uint32) *GraphNode {
-	queries := buildSymbolQueries(langName)
-	functionQuery := queries["function"]
-	if functionQuery == "" {
-		return nil
-	}
-
-	results, err := mgr.Query(tree, functionQuery, langName, content)
-	if err != nil {
-		return nil
-	}
-
-	// Find the function that contains this line
-	for _, result := range results {
-		if result.StartPosition.Row <= line && result.EndPosition.Row >= line {
-			return &GraphNode{
-				Symbol: strings.TrimSpace(result.Text),
-				Type:   "function",
-				Line:   result.StartPosition.Row,
-			}
-		}
-	}
-
-	return nil
-}
-
-// buildCallQuery creates a query to find function calls
-func buildCallQuery(langName string) string {
-	switch langName {
-	case "typescript", "javascript":
-		return `(call_expression function: (identifier) @name)`
-	case "go":
-		return `(call_expression function: (identifier) @name)`
-	case "python":
-		return `(call function: (identifier) @name)`
-	default:
-		return ""
-	}
-}
-
-// buildSpecificCallQuery creates a query to find calls to a specific function
-func buildSpecificCallQuery(langName, funcName string) string {
-	switch langName {
-	case "typescript", "javascript":
-		return fmt.Sprintf(`(call_expression function: (identifier) @name (#eq? @name "%s"))`, funcName)
-	case "go":
-		return fmt.Sprintf(`(call_expression function: (identifier) @name (#eq? @name "%s"))`, funcName)
-	case "python":
-		return fmt.Sprintf(`(call function: (identifier) @name (#eq? @name "%s"))`, funcName)
-	default:
-		return ""
-	}
-}
-
 // captureGraph formats the feature graph and returns as string
 func captureGraph(graph *FeatureGraph, verbose bool) string {
 	var sb strings.Builder
@@ -615,7 +285,7 @@ func captureGraph(graph *FeatureGraph, verbose bool) string {
 		graph.EntryPoint.Symbol, graphModeFlag, graph.MaxDepth))
 
 	// Group nodes by level
-	levelNodes := make(map[int][]*GraphNode)
+	levelNodes := make(map[int][]*index.GraphNode)
 	for _, node := range graph.Nodes {
 		levelNodes[node.Level] = append(levelNodes[node.Level], node)
 	}

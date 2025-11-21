@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/NightTrek/atse/internal/index"
 	"github.com/NightTrek/atse/internal/parser"
 	sitter "github.com/smacker/go-tree-sitter"
 )
@@ -47,30 +48,81 @@ func formatText(results []Result, verbose bool) string {
 		return "No results found."
 	}
 
-	var sb strings.Builder
+	// Categorize results
+	var production, tests, generated []Result
+
 	for _, r := range results {
-		// Location line
-		sb.WriteString(fmt.Sprintf("%s:%d:%d", r.File, r.Line+1, r.Column))
-
-		if r.Name != "" {
-			sb.WriteString(fmt.Sprintf(" - %s", r.Name))
-		}
-		sb.WriteString("\n")
-
-		// Verbose mode: include text
-		if verbose && r.Text != "" {
-			// Indent the text
-			lines := strings.Split(r.Text, "\n")
-			for _, line := range lines {
-				if strings.TrimSpace(line) != "" {
-					sb.WriteString(fmt.Sprintf("  %s\n", line))
-				}
-			}
-			sb.WriteString("\n")
+		lowerPath := strings.ToLower(r.File)
+		if isGenerated(lowerPath) {
+			generated = append(generated, r)
+		} else if isTest(lowerPath) {
+			tests = append(tests, r)
+		} else {
+			production = append(production, r)
 		}
 	}
 
+	var sb strings.Builder
+
+	// Helper to print a group
+	printGroup := func(title string, group []Result, showDetails bool) {
+		if len(group) == 0 {
+			return
+		}
+		sb.WriteString(fmt.Sprintf("\n[%s Code] (%d results)\n", title, len(group)))
+		if !showDetails {
+			sb.WriteString("  (Hidden by default, use --verbose to see)\n")
+			return
+		}
+		for _, r := range group {
+			sb.WriteString(fmt.Sprintf("  %s:%d:%d", r.File, r.Line+1, r.Column))
+			if r.Name != "" {
+				sb.WriteString(fmt.Sprintf(" - %s", r.Name))
+			}
+			sb.WriteString("\n")
+
+			if verbose && r.Text != "" {
+				lines := strings.Split(r.Text, "\n")
+				for _, line := range lines {
+					if strings.TrimSpace(line) != "" {
+						sb.WriteString(fmt.Sprintf("    %s\n", line))
+					}
+				}
+				sb.WriteString("\n")
+			}
+		}
+	}
+
+	// Always show production code
+	if len(production) > 0 {
+		printGroup("Production", production, true)
+	}
+
+	// Show tests/generated only if verbose, or if they are the only results
+	showOthers := verbose || (len(production) == 0)
+
+	if len(tests) > 0 {
+		printGroup("Test", tests, showOthers)
+	}
+	if len(generated) > 0 {
+		printGroup("Generated", generated, showOthers)
+	}
+
 	return sb.String()
+}
+
+func isTest(path string) bool {
+	return strings.Contains(path, "_test") ||
+		strings.Contains(path, ".test.") ||
+		strings.Contains(path, ".spec.") ||
+		strings.Contains(path, "__tests__") ||
+		strings.Contains(path, "mock")
+}
+
+func isGenerated(path string) bool {
+	return strings.Contains(path, "generated") ||
+		strings.Contains(path, "proto") ||
+		strings.Contains(path, ".pb.go")
 }
 
 // formatJSON formats results as JSON
@@ -95,8 +147,8 @@ func formatLocations(results []Result) string {
 	return sb.String()
 }
 
-// QueryMatchToResult converts a parser.QueryMatch to a Result
-func QueryMatchToResult(match *parser.QueryMatch, filePath string) Result {
+// QueryMatchToResult converts a index.QueryMatch to a Result
+func QueryMatchToResult(match *index.QueryMatch, filePath string) Result {
 	return Result{
 		File:          filePath,
 		Line:          match.StartPosition.Row,

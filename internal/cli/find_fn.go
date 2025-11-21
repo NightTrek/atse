@@ -37,6 +37,11 @@ func runFindFn(cmd *cobra.Command, args []string) error {
 		path = args[1]
 	}
 
+	// Apply smart limits
+	if limitFlag == 0 {
+		limitFlag = 20
+	}
+
 	// Create parser manager
 	mgr := parser.New()
 
@@ -51,61 +56,41 @@ func runFindFn(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Process each file
+	// Get or load symbol index
+	idx, err := mgr.GetOrLoadIndex(path, files, verboseFlag)
+	if err != nil {
+		return fmt.Errorf("failed to get symbol index: %w", err)
+	}
+
+	// Find call sites using O(1) lookup
+	callSites := idx.FindCallSites(funcName)
+
+	// Filter results based on selected files
+	// (Index might contain calls from files not in the current selection)
+	fileSet := make(map[string]bool)
+	for _, f := range files {
+		fileSet[f.Path] = true
+	}
+
 	var allResults []output.Result
-	filesProcessed := 0
-
-	for _, file := range files {
-		// Parse the file
-		tree, err := mgr.ParseFile(file.Path)
-		if err != nil {
-			if verboseFlag {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to parse %s: %v\n", file.Path, err)
-			}
-			continue
+	for _, site := range callSites {
+		if fileSet[site.CallerFilePath] {
+			allResults = append(allResults, output.Result{
+				File: site.CallerFilePath,
+				Line: site.CallerLine,
+				// Column is not stored in CallSite yet, use 0 or update CallSite
+				Column: 0,
+				Name:   site.CallerSymbol,
+				Text:   fmt.Sprintf("%s calls %s", site.CallerSymbol, site.CalledSymbol),
+			})
 		}
+	}
 
-		// Get file content
-		content, err := mgr.GetContent(file.Path)
-		if err != nil {
-			if verboseFlag {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to get content for %s: %v\n", file.Path, err)
-			}
-			continue
-		}
-
-		// Infer language
-		langName, err := mgr.InferLanguage(file.Path)
-		if err != nil {
-			if verboseFlag {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to infer language for %s: %v\n", file.Path, err)
-			}
-			continue
-		}
-
-		// Build language-specific query for function calls
-		queryString := buildFunctionCallQuery(langName, funcName)
-		if queryString == "" {
-			if verboseFlag {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: unsupported language for %s\n", file.Path)
-			}
-			continue
-		}
-
-		// Execute query
-		matches, err := mgr.Query(tree, queryString, langName, content)
-		if err != nil {
-			if verboseFlag {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: query failed for %s: %v\n", file.Path, err)
-			}
-			continue
-		}
-
-		// Convert matches to results
-		for _, match := range matches {
-			allResults = append(allResults, output.QueryMatchToResult(match, file.Path))
-		}
-		filesProcessed++
+	// Apply limit
+	totalResults := len(allResults)
+	if limitFlag > 0 && totalResults > limitFlag {
+		allResults = allResults[:limitFlag]
+		fmt.Fprintf(cmd.ErrOrStderr(), "⚠️  Warning: Results truncated to %d (found %d). Use --limit 0 to show all.\n", limitFlag, totalResults)
 	}
 
 	// Format and output results
@@ -128,7 +113,7 @@ func runFindFn(cmd *cobra.Command, args []string) error {
 		StartMemoryBytes: startMem,
 		PeakMemoryBytes:  peakMem,
 		EndMemoryBytes:   endMem,
-		FilesProcessed:   filesProcessed,
+		FilesProcessed:   len(files),
 		ResultsCount:     len(allResults),
 	}
 
@@ -141,6 +126,7 @@ func runFindFn(cmd *cobra.Command, args []string) error {
 }
 
 // buildFunctionCallQuery creates a language-specific query for finding function calls
+// (Kept for reference or if we need to fallback to manual search, but unused in optimized version)
 func buildFunctionCallQuery(langName, funcName string) string {
 	switch langName {
 	case "typescript", "javascript":

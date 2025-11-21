@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/NightTrek/atse/internal/index"
+	"github.com/NightTrek/atse/internal/util"
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/golang"
 	"github.com/smacker/go-tree-sitter/javascript"
@@ -19,7 +21,8 @@ import (
 type Manager struct {
 	languages map[string]*sitter.Language
 	trees     map[string]*sitter.Tree
-	contents  map[string][]byte // Store file contents for node extraction
+	contents  map[string][]byte  // Store file contents for node extraction
+	Index     *index.SymbolIndex // Shared symbol index
 	mu        sync.RWMutex
 }
 
@@ -30,6 +33,65 @@ func New() *Manager {
 		trees:     make(map[string]*sitter.Tree),
 		contents:  make(map[string][]byte),
 	}
+}
+
+// GetOrLoadIndex retrieves the persistent index or builds it if missing/stale
+func (m *Manager) GetOrLoadIndex(rootPath string, files []util.FileMatch, verbose bool) (*index.SymbolIndex, error) {
+	m.mu.RLock()
+	if m.Index != nil {
+		defer m.mu.RUnlock()
+		return m.Index, nil
+	}
+	m.mu.RUnlock()
+
+	// Determine cache path
+	absRoot, err := filepath.Abs(rootPath)
+	if err != nil {
+		return nil, err
+	}
+	// Try project root .atse/index.cache
+	cacheDir := filepath.Join(absRoot, ".atse")
+	cachePath := filepath.Join(cacheDir, "index.cache")
+
+	// Try to load from disk
+	idx, err := index.Load(cachePath)
+	if err == nil && idx != nil {
+		// Validate cache (check mtimes)
+		if !idx.IsStale(files) {
+			if verbose {
+				fmt.Fprintf(os.Stderr, "Loaded index from cache: %s\n", cachePath)
+			}
+			m.mu.Lock()
+			m.Index = idx
+			m.mu.Unlock()
+			return idx, nil
+		}
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Index cache is stale, rebuilding...\n")
+		}
+	} else if verbose {
+		fmt.Fprintf(os.Stderr, "No index cache found at %s, building...\n", cachePath)
+	}
+
+	// Build index
+	idx, err = index.Build(m, files, verbose)
+	if err != nil {
+		return nil, err
+	}
+
+	// Save index
+	if err := idx.Save(cachePath); err != nil {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Warning: failed to save index cache: %v\n", err)
+		}
+	} else if verbose {
+		fmt.Fprintf(os.Stderr, "Saved index to %s\n", cachePath)
+	}
+
+	m.mu.Lock()
+	m.Index = idx
+	m.mu.Unlock()
+	return idx, nil
 }
 
 // LoadLanguage loads a Tree-sitter language grammar
@@ -144,7 +206,7 @@ func (m *Manager) GetContent(filePath string) ([]byte, error) {
 }
 
 // Query executes a Tree-sitter query on a syntax tree
-func (m *Manager) Query(tree *sitter.Tree, queryString string, langName string, content []byte) ([]*QueryMatch, error) {
+func (m *Manager) Query(tree *sitter.Tree, queryString string, langName string, content []byte) ([]*index.QueryMatch, error) {
 	m.mu.RLock()
 	lang, exists := m.languages[langName]
 	m.mu.RUnlock()
@@ -164,7 +226,7 @@ func (m *Manager) Query(tree *sitter.Tree, queryString string, langName string, 
 
 	cursor.Exec(query, tree.RootNode())
 
-	var matches []*QueryMatch
+	var matches []*index.QueryMatch
 	for {
 		match, ok := cursor.NextMatch()
 		if !ok {
@@ -174,7 +236,7 @@ func (m *Manager) Query(tree *sitter.Tree, queryString string, langName string, 
 		for _, capture := range match.Captures {
 			nodeContent := capture.Node.Content(content)
 
-			matches = append(matches, &QueryMatch{
+			matches = append(matches, &index.QueryMatch{
 				Name:          query.CaptureNameForId(capture.Index),
 				Text:          nodeContent,
 				StartPosition: capture.Node.StartPoint(),
@@ -189,6 +251,19 @@ func (m *Manager) Query(tree *sitter.Tree, queryString string, langName string, 
 }
 
 // ListNodesByType finds all nodes of a specific type in a tree
+// Note: NodeInfo is not in index package yet, but used by list-fns.
+// I should probably move NodeInfo to index package too if needed by Parser interface.
+// But Parser interface only needs Extract* methods and Query.
+// ListNodesByType is used by list-fns command directly.
+// I will define NodeInfo here for now (if not moved).
+type NodeInfo struct {
+	Name          string
+	Type          string
+	Text          string
+	StartPosition sitter.Point
+	EndPosition   sitter.Point
+}
+
 func (m *Manager) ListNodesByType(tree *sitter.Tree, nodeType string, content []byte) []*NodeInfo {
 	var nodes []*NodeInfo
 	var traverse func(*sitter.Node)
@@ -267,60 +342,9 @@ func (m *Manager) InvalidateFile(filePath string) {
 	delete(m.contents, filePath)
 }
 
-// QueryMatch represents a single match from a Tree-sitter query
-type QueryMatch struct {
-	Name          string
-	Text          string
-	StartPosition sitter.Point
-	EndPosition   sitter.Point
-	StartByte     uint32
-	EndByte       uint32
-}
-
-// NodeInfo contains information about a syntax tree node
-type NodeInfo struct {
-	Name          string
-	Type          string
-	Text          string
-	StartPosition sitter.Point
-	EndPosition   sitter.Point
-}
-
-// TypeUsage represents where a type is used
-type TypeUsage struct {
-	TypeName  string
-	UsageType string // "parameter", "return", "field", "variable"
-	FilePath  string
-	Line      uint32
-}
-
-// Import represents an import statement
-type Import struct {
-	ImportPath string
-	Alias      string
-	FilePath   string
-	Line       uint32
-}
-
-// CallSite represents where a function is called
-type CallSite struct {
-	CallerSymbol   string
-	CallerFilePath string
-	CallerLine     uint32
-	CalledSymbol   string
-}
-
-// EventUsage represents event emitter or listener usage
-type EventUsage struct {
-	EventName string
-	Type      string // "emit", "listen", "on"
-	FilePath  string
-	Line      uint32
-}
-
 // ExtractTypeUsages finds all type references in a file
-func (m *Manager) ExtractTypeUsages(tree *sitter.Tree, langName string, content []byte, filePath string) []*TypeUsage {
-	var usages []*TypeUsage
+func (m *Manager) ExtractTypeUsages(tree *sitter.Tree, langName string, content []byte, filePath string) []*index.TypeUsage {
+	var usages []*index.TypeUsage
 
 	// Build queries for type usages based on language
 	var queries []string
@@ -350,7 +374,7 @@ func (m *Manager) ExtractTypeUsages(tree *sitter.Tree, langName string, content 
 		for _, result := range results {
 			typeName := strings.TrimSpace(result.Text)
 			if typeName != "" {
-				usages = append(usages, &TypeUsage{
+				usages = append(usages, &index.TypeUsage{
 					TypeName:  typeName,
 					UsageType: "reference",
 					FilePath:  filePath,
@@ -364,8 +388,8 @@ func (m *Manager) ExtractTypeUsages(tree *sitter.Tree, langName string, content 
 }
 
 // ExtractImports parses import/require/include statements
-func (m *Manager) ExtractImports(tree *sitter.Tree, langName string, content []byte, filePath string) []Import {
-	var imports []Import
+func (m *Manager) ExtractImports(tree *sitter.Tree, langName string, content []byte, filePath string) []index.Import {
+	var imports []index.Import
 
 	// Build queries for imports based on language
 	var queryString string
@@ -390,7 +414,7 @@ func (m *Manager) ExtractImports(tree *sitter.Tree, langName string, content []b
 	for _, result := range results {
 		importPath := strings.Trim(strings.TrimSpace(result.Text), "\"'`")
 		if importPath != "" {
-			imports = append(imports, Import{
+			imports = append(imports, index.Import{
 				ImportPath: importPath,
 				FilePath:   filePath,
 				Line:       result.StartPosition.Row,
@@ -402,8 +426,8 @@ func (m *Manager) ExtractImports(tree *sitter.Tree, langName string, content []b
 }
 
 // ExtractCallSites finds all function call expressions
-func (m *Manager) ExtractCallSites(tree *sitter.Tree, langName string, content []byte, filePath string) []CallSite {
-	var callSites []CallSite
+func (m *Manager) ExtractCallSites(tree *sitter.Tree, langName string, content []byte, filePath string) []index.CallSite {
+	var callSites []index.CallSite
 
 	// Build queries for function calls based on language
 	var queryString string
@@ -435,7 +459,7 @@ func (m *Manager) ExtractCallSites(tree *sitter.Tree, langName string, content [
 		// Find containing function
 		caller := m.findContainingFunction(tree, result.StartPosition.Row, content)
 
-		callSites = append(callSites, CallSite{
+		callSites = append(callSites, index.CallSite{
 			CallerSymbol:   caller,
 			CallerFilePath: filePath,
 			CallerLine:     result.StartPosition.Row,
@@ -479,8 +503,8 @@ func (m *Manager) findContainingFunction(tree *sitter.Tree, line uint32, content
 }
 
 // ExtractEventPatterns finds event emitter/listener patterns
-func (m *Manager) ExtractEventPatterns(tree *sitter.Tree, langName string, content []byte, filePath string) []EventUsage {
-	var events []EventUsage
+func (m *Manager) ExtractEventPatterns(tree *sitter.Tree, langName string, content []byte, filePath string) []index.EventUsage {
+	var events []index.EventUsage
 
 	// For now, use a simple pattern: look for .on(), .emit(), addEventListener calls
 	// This is language-agnostic at the call site level
@@ -517,7 +541,7 @@ func (m *Manager) ExtractEventPatterns(tree *sitter.Tree, langName string, conte
 		}
 
 		if eventName != "" && eventType != "" {
-			events = append(events, EventUsage{
+			events = append(events, index.EventUsage{
 				EventName: eventName,
 				Type:      eventType,
 				FilePath:  filePath,

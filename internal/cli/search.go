@@ -48,6 +48,11 @@ func runSearch(cmd *cobra.Command, args []string) error {
 		path = args[1]
 	}
 
+	// Apply smart limits
+	if limitFlag == 0 {
+		limitFlag = 20
+	}
+
 	// Create parser manager
 	mgr := parser.New()
 
@@ -62,42 +67,45 @@ func runSearch(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Search for symbols
+	// Get or load symbol index
+	idx, err := mgr.GetOrLoadIndex(path, files, verboseFlag)
+	if err != nil {
+		return fmt.Errorf("failed to get symbol index: %w", err)
+	}
+
+	// Search for symbols using index keys
 	var matches []SymbolMatch
-	filesProcessed := 0
+	symbolNames := idx.GetAllSymbolNames()
 
-	for _, file := range files {
-		// Parse the file
-		tree, err := mgr.ParseFile(file.Path)
-		if err != nil {
-			if verboseFlag {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to parse %s: %v\n", file.Path, err)
+	// Filter files set for fast lookup if needed, but here we iterate symbols.
+	// A symbol might be defined in a file we are NOT interested in (if index covers more).
+	// We should check if the symbol's file is in our `files` list.
+	fileSet := make(map[string]bool)
+	for _, f := range files {
+		fileSet[f.Path] = true
+	}
+
+	for _, name := range symbolNames {
+		// Check if name matches query
+		if matchesQuery(name, query, fuzzyFlag) {
+			// Get nodes
+			nodes := idx.FindSymbol(name)
+			for _, node := range nodes {
+				// Filter by file
+				if fileSet[node.FilePath] {
+					score := calculateScore(name, query)
+					matches = append(matches, SymbolMatch{
+						Name:      node.Symbol,
+						Type:      node.Type,
+						Signature: node.Symbol, // Placeholder as we don't have full text
+						FilePath:  node.FilePath,
+						Line:      node.Line,
+						Column:    0, // Not stored in index
+						Score:     score,
+					})
+				}
 			}
-			continue
 		}
-
-		// Get file content
-		content, err := mgr.GetContent(file.Path)
-		if err != nil {
-			if verboseFlag {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to get content for %s: %v\n", file.Path, err)
-			}
-			continue
-		}
-
-		// Infer language
-		langName, err := mgr.InferLanguage(file.Path)
-		if err != nil {
-			if verboseFlag {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to infer language for %s: %v\n", file.Path, err)
-			}
-			continue
-		}
-
-		// Find symbols in this file
-		fileMatches := findSymbols(mgr, tree, langName, content, file.Path, query)
-		matches = append(matches, fileMatches...)
-		filesProcessed++
 	}
 
 	// Filter by type if specified
@@ -109,8 +117,10 @@ func runSearch(cmd *cobra.Command, args []string) error {
 	sortMatches(matches, query)
 
 	// Apply limit
-	if limitFlag > 0 && len(matches) > limitFlag {
+	totalMatches := len(matches)
+	if limitFlag > 0 && totalMatches > limitFlag {
 		matches = matches[:limitFlag]
+		fmt.Fprintf(cmd.ErrOrStderr(), "⚠️  Warning: Results truncated to %d (found %d). Use --limit 0 to show all.\n", limitFlag, totalMatches)
 	}
 
 	// Format and output
@@ -133,7 +143,7 @@ func runSearch(cmd *cobra.Command, args []string) error {
 		StartMemoryBytes: startMem,
 		PeakMemoryBytes:  peakMem,
 		EndMemoryBytes:   endMem,
-		FilesProcessed:   filesProcessed,
+		FilesProcessed:   len(files),
 		ResultsCount:     len(matches),
 	}
 
@@ -156,7 +166,7 @@ type SymbolMatch struct {
 	Score     int // Relevance score for sorting
 }
 
-// findSymbols searches for symbols in a file
+// findSymbols searches for symbols in a file (Legacy - kept if needed by other parts or tests, but unused by runSearch now)
 func findSymbols(mgr *parser.Manager, tree *sitter.Tree, langName string, content []byte, filePath string, query string) []SymbolMatch {
 	var matches []SymbolMatch
 
@@ -197,6 +207,7 @@ func findSymbols(mgr *parser.Manager, tree *sitter.Tree, langName string, conten
 }
 
 // buildSymbolQueries creates language-specific queries for finding symbols
+// (Now duplicated in index package, but kept here if findSymbols needs it)
 func buildSymbolQueries(langName string) map[string]string {
 	queries := make(map[string]string)
 
