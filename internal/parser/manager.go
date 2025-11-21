@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/NightTrek/atse/internal/index"
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/golang"
 	"github.com/smacker/go-tree-sitter/javascript"
@@ -20,7 +21,13 @@ type Manager struct {
 	languages map[string]*sitter.Language
 	trees     map[string]*sitter.Tree
 	contents  map[string][]byte // Store file contents for node extraction
-	mu        sync.RWMutex
+
+	// Symbol index cache (for performance optimization)
+	symbolIndex interface{} // Will be *SymbolIndex from cli package
+	indexBuilt  bool
+	indexFiles  []string // Track which files are in the index
+
+	mu sync.RWMutex
 }
 
 // New creates a new parser manager
@@ -267,6 +274,38 @@ func (m *Manager) InvalidateFile(filePath string) {
 	delete(m.contents, filePath)
 }
 
+// SetSymbolIndex caches a symbol index for reuse across commands
+func (m *Manager) SetSymbolIndex(index interface{}, files []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.symbolIndex = index
+	m.indexBuilt = true
+	m.indexFiles = files
+}
+
+// GetSymbolIndex retrieves the cached symbol index if it exists
+func (m *Manager) GetSymbolIndex() (interface{}, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.symbolIndex, m.indexBuilt
+}
+
+// InvalidateIndex clears the cached symbol index
+func (m *Manager) InvalidateIndex() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.symbolIndex = nil
+	m.indexBuilt = false
+	m.indexFiles = nil
+}
+
+// HasSymbolIndex checks if a symbol index is cached
+func (m *Manager) HasSymbolIndex() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.indexBuilt && m.symbolIndex != nil
+}
+
 // QueryMatch represents a single match from a Tree-sitter query
 type QueryMatch struct {
 	Name          string
@@ -286,41 +325,9 @@ type NodeInfo struct {
 	EndPosition   sitter.Point
 }
 
-// TypeUsage represents where a type is used
-type TypeUsage struct {
-	TypeName  string
-	UsageType string // "parameter", "return", "field", "variable"
-	FilePath  string
-	Line      uint32
-}
-
-// Import represents an import statement
-type Import struct {
-	ImportPath string
-	Alias      string
-	FilePath   string
-	Line       uint32
-}
-
-// CallSite represents where a function is called
-type CallSite struct {
-	CallerSymbol   string
-	CallerFilePath string
-	CallerLine     uint32
-	CalledSymbol   string
-}
-
-// EventUsage represents event emitter or listener usage
-type EventUsage struct {
-	EventName string
-	Type      string // "emit", "listen", "on"
-	FilePath  string
-	Line      uint32
-}
-
 // ExtractTypeUsages finds all type references in a file
-func (m *Manager) ExtractTypeUsages(tree *sitter.Tree, langName string, content []byte, filePath string) []*TypeUsage {
-	var usages []*TypeUsage
+func (m *Manager) ExtractTypeUsages(tree *sitter.Tree, langName string, content []byte, filePath string) []*index.TypeUsage {
+	var usages []*index.TypeUsage
 
 	// Build queries for type usages based on language
 	var queries []string
@@ -350,7 +357,7 @@ func (m *Manager) ExtractTypeUsages(tree *sitter.Tree, langName string, content 
 		for _, result := range results {
 			typeName := strings.TrimSpace(result.Text)
 			if typeName != "" {
-				usages = append(usages, &TypeUsage{
+				usages = append(usages, &index.TypeUsage{
 					TypeName:  typeName,
 					UsageType: "reference",
 					FilePath:  filePath,
@@ -364,8 +371,8 @@ func (m *Manager) ExtractTypeUsages(tree *sitter.Tree, langName string, content 
 }
 
 // ExtractImports parses import/require/include statements
-func (m *Manager) ExtractImports(tree *sitter.Tree, langName string, content []byte, filePath string) []Import {
-	var imports []Import
+func (m *Manager) ExtractImports(tree *sitter.Tree, langName string, content []byte, filePath string) []index.Import {
+	var imports []index.Import
 
 	// Build queries for imports based on language
 	var queryString string
@@ -390,7 +397,7 @@ func (m *Manager) ExtractImports(tree *sitter.Tree, langName string, content []b
 	for _, result := range results {
 		importPath := strings.Trim(strings.TrimSpace(result.Text), "\"'`")
 		if importPath != "" {
-			imports = append(imports, Import{
+			imports = append(imports, index.Import{
 				ImportPath: importPath,
 				FilePath:   filePath,
 				Line:       result.StartPosition.Row,
@@ -402,8 +409,8 @@ func (m *Manager) ExtractImports(tree *sitter.Tree, langName string, content []b
 }
 
 // ExtractCallSites finds all function call expressions
-func (m *Manager) ExtractCallSites(tree *sitter.Tree, langName string, content []byte, filePath string) []CallSite {
-	var callSites []CallSite
+func (m *Manager) ExtractCallSites(tree *sitter.Tree, langName string, content []byte, filePath string) []index.CallSite {
+	var callSites []index.CallSite
 
 	// Build queries for function calls based on language
 	var queryString string
@@ -435,7 +442,7 @@ func (m *Manager) ExtractCallSites(tree *sitter.Tree, langName string, content [
 		// Find containing function
 		caller := m.findContainingFunction(tree, result.StartPosition.Row, content)
 
-		callSites = append(callSites, CallSite{
+		callSites = append(callSites, index.CallSite{
 			CallerSymbol:   caller,
 			CallerFilePath: filePath,
 			CallerLine:     result.StartPosition.Row,
@@ -479,8 +486,8 @@ func (m *Manager) findContainingFunction(tree *sitter.Tree, line uint32, content
 }
 
 // ExtractEventPatterns finds event emitter/listener patterns
-func (m *Manager) ExtractEventPatterns(tree *sitter.Tree, langName string, content []byte, filePath string) []EventUsage {
-	var events []EventUsage
+func (m *Manager) ExtractEventPatterns(tree *sitter.Tree, langName string, content []byte, filePath string) []index.EventUsage {
+	var events []index.EventUsage
 
 	// For now, use a simple pattern: look for .on(), .emit(), addEventListener calls
 	// This is language-agnostic at the call site level
@@ -517,7 +524,7 @@ func (m *Manager) ExtractEventPatterns(tree *sitter.Tree, langName string, conte
 		}
 
 		if eventName != "" && eventType != "" {
-			events = append(events, EventUsage{
+			events = append(events, index.EventUsage{
 				EventName: eventName,
 				Type:      eventType,
 				FilePath:  filePath,

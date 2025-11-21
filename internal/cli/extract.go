@@ -49,7 +49,7 @@ func runExtract(cmd *cobra.Command, args []string) error {
 	mgr := parser.New()
 
 	// Collect files
-	files, err := util.WalkFiles(path, recursiveFlag, includeFlag, excludeFlag)
+	files, err := util.WalkFiles(path, recursiveFlag, includeFlag, excludeFlag, excludeDefaultsFlag)
 	if err != nil {
 		return fmt.Errorf("failed to collect files: %w", err)
 	}
@@ -59,26 +59,64 @@ func runExtract(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Build the graph first to discover all components
-	graph := NewFeatureGraph(symbol, extractDepthFlag)
+	// Check for --rebuild-index flag
+	if rebuildIndexFlag {
+		mgr.InvalidateIndex()
+	}
 
-	// Find the entry point symbol
-	entryPoint := findEntryPoint(mgr, files, symbol)
-	if entryPoint == nil {
+	// Build symbol index (or reuse cached one)
+	index, err := buildSymbolIndex(mgr, files, verboseFlag)
+	if err != nil {
+		return fmt.Errorf("failed to build symbol index: %w", err)
+	}
+
+	// Find the entry point using the index (O(1) lookup)
+	if verboseFlag {
+		fmt.Fprintf(os.Stderr, "Finding entry point: %s...\n", symbol)
+	}
+
+	entryNodes := index.FindSymbol(symbol)
+	if len(entryNodes) == 0 {
 		fmt.Printf("Symbol '%s' not found in codebase.\n", symbol)
 		return nil
 	}
 
+	entryPoint := entryNodes[0]
+	entryPoint.Level = 0
+
+	if verboseFlag {
+		fmt.Fprintf(os.Stderr, "  ✓ Found %s in %s at line %d\n\n", symbol, entryPoint.FilePath, entryPoint.Line+1)
+	}
+
+	// Build the graph using index-based traversal
+	graph := NewFeatureGraph(symbol, extractDepthFlag)
 	graph.EntryPoint = entryPoint
 
-	// Traverse to discover all components
+	// Parse connection types (default to calls)
+	connTypes, err := parseConnectionTypes("calls")
+	if err != nil {
+		return fmt.Errorf("invalid connection types: %w", err)
+	}
+
+	// Create connection finders
+	finders := createConnectionFinders(connTypes)
+
+	if verboseFlag {
+		fmt.Fprintf(os.Stderr, "Traversing graph (mode=%s, depth=%d)...\n", extractModeFlag, extractDepthFlag)
+	}
+
+	// Traverse using index (much faster than old method)
 	switch extractModeFlag {
 	case "bfs":
-		traverseBFS(mgr, files, graph, false)
+		traverseBFSWithIndex(index, graph, finders, 0) // 0 = no symbol limit
 	case "dfs":
-		traverseDFS(mgr, files, graph, false)
+		traverseDFSWithIndex(index, graph, finders, 0)
 	default:
 		return fmt.Errorf("invalid mode: %s (use 'bfs' or 'dfs')", extractModeFlag)
+	}
+
+	if verboseFlag {
+		fmt.Fprintf(os.Stderr, "✓ Graph traversal complete: %d symbols found\n\n", len(graph.Nodes))
 	}
 
 	// Extract source code for all discovered components

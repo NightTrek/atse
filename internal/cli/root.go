@@ -17,6 +17,15 @@ var (
 	limitFlag     int
 	noCacheFlag   bool
 
+	// Smart filtering flags
+	productionOnlyFlag   bool
+	includeTestsFlag     bool
+	includeGeneratedFlag bool
+	excludeDefaultsFlag  bool
+
+	// Performance flags
+	rebuildIndexFlag bool
+
 	logMetricsFlag bool
 	metricsLogFile string
 	tokenModelFlag string
@@ -56,6 +65,15 @@ func init() {
 	rootCmd.PersistentFlags().StringSliceVar(&excludeFlag, "exclude", []string{}, "Exclude file patterns (e.g., '*.test.ts')")
 	rootCmd.PersistentFlags().IntVar(&limitFlag, "limit", 0, "Limit number of results (0 = no limit)")
 	rootCmd.PersistentFlags().BoolVar(&noCacheFlag, "no-cache", false, "Bypass parse tree cache")
+
+	// Smart filtering flags
+	rootCmd.PersistentFlags().BoolVar(&productionOnlyFlag, "production-only", false, "Only show production code (exclude tests, generated files)")
+	rootCmd.PersistentFlags().BoolVar(&includeTestsFlag, "include-tests", false, "Include test files in results")
+	rootCmd.PersistentFlags().BoolVar(&includeGeneratedFlag, "include-generated", false, "Include generated files in results")
+	rootCmd.PersistentFlags().BoolVar(&excludeDefaultsFlag, "exclude-defaults", true, "Apply default exclude patterns for common noise (tests, generated, node_modules)")
+
+	// Performance flags
+	rootCmd.PersistentFlags().BoolVar(&rebuildIndexFlag, "rebuild-index", false, "Force rebuild of symbol index (ignore cache)")
 
 	// Metrics logging flags (token counting + JSONL logs)
 	rootCmd.PersistentFlags().BoolVar(&logMetricsFlag, "log-metrics", false, "Log command output token metrics to a JSONL file")
