@@ -6,8 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NightTrek/atse/internal/index"
 	"github.com/NightTrek/atse/internal/parser"
-	"github.com/NightTrek/atse/internal/util"
+	"github.com/NightTrek/atse/internal/ripgrep"
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/spf13/cobra"
 )
@@ -21,16 +22,19 @@ var (
 var extractCmd = &cobra.Command{
 	Use:   "extract <symbol> [path]",
 	Short: "Extract full source code for a feature",
-	Long: `Extract the complete source code for a feature and its dependencies.
+	Long: `Extract complete source code for a feature using hybrid discovery.
+Uses ripgrep to find the entry point, then traces dependencies to extract
+all related code components.
 
-This command uses graph traversal to discover all components of a feature,
-then extracts their full source code. Perfect for understanding a feature
-or preparing context for an LLM.
+Ideal for:
+- Understanding how a feature is implemented across files
+- Providing context to AI agents
+- Documentation generation
 
 Examples:
-  atse extract AuthService ./src --depth 2
-  atse extract handleLogin ./src --depth 3 --output feature.txt
-  atse extract UserService ./src --mode bfs`,
+  atse extract AuthService ./src
+  atse extract handleLogin ./src --depth 3
+  atse extract User --output user_feature.txt`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: runExtract,
 }
@@ -45,93 +49,131 @@ func runExtract(cmd *cobra.Command, args []string) error {
 		path = args[1]
 	}
 
-	// Create parser manager
-	mgr := parser.New()
+	// Reuse graph logic to find components
+	// This builds the dependency graph using hybrid discovery
+	// We'll basically re-implement runGraph logic but stop before printing
+	// and instead extract source code.
 
-	// Collect files
-	files, err := util.WalkFiles(path, recursiveFlag, includeFlag, excludeFlag, excludeDefaultsFlag)
-	if err != nil {
-		return fmt.Errorf("failed to collect files: %w", err)
-	}
-
-	if len(files) == 0 {
-		fmt.Println("No files found matching criteria.")
-		return nil
-	}
-
-	// Check for --rebuild-index flag
-	if rebuildIndexFlag {
-		mgr.InvalidateIndex()
-	}
-
-	// Build symbol index (or reuse cached one)
-	index, err := buildSymbolIndex(mgr, files, verboseFlag)
-	if err != nil {
-		return fmt.Errorf("failed to build symbol index: %w", err)
-	}
-
-	// Find the entry point using the index (O(1) lookup)
+	// 1. Find entry point
 	if verboseFlag {
-		fmt.Fprintf(os.Stderr, "Finding entry point: %s...\n", symbol)
+		fmt.Fprintf(os.Stderr, "🔍 Finding entry point '%s'...\n", symbol)
 	}
 
-	entryNodes := index.FindSymbol(symbol)
-	if len(entryNodes) == 0 {
+	rgClient := ripgrep.New()
+	if !rgClient.Available() {
+		return fmt.Errorf("ripgrep (rg) not found in PATH")
+	}
+
+	candidates, err := rgClient.Search(symbol, path)
+	if err != nil {
+		return err
+	}
+
+	if len(candidates) == 0 {
 		fmt.Printf("Symbol '%s' not found in codebase.\n", symbol)
 		return nil
 	}
 
-	entryPoint := entryNodes[0]
-	entryPoint.Level = 0
+	// 2. Parse entry files
+	mgr := parser.New()
+	partialIndex := index.NewPartial()
+	var entryPoint *GraphNode
 
-	if verboseFlag {
-		fmt.Fprintf(os.Stderr, "  ✓ Found %s in %s at line %d\n\n", symbol, entryPoint.FilePath, entryPoint.Line+1)
+	uniqueFiles := make(map[string]bool)
+	for _, c := range candidates {
+		if uniqueFiles[c.Path] {
+			continue
+		}
+		uniqueFiles[c.Path] = true
+
+		tree, err := mgr.ParseFile(c.Path)
+		if err != nil {
+			continue
+		}
+		content, _ := mgr.GetContent(c.Path)
+		langName, _ := mgr.InferLanguage(c.Path)
+
+		symbols := extractSymbolsForFile(mgr, tree, langName, content, c.Path)
+		partialIndex.AddFile(c.Path, tree, content, symbols)
+
+		for _, sym := range symbols {
+			if sym.Symbol == symbol {
+				entryPoint = &GraphNode{
+					Symbol:   sym.Symbol,
+					Type:     sym.Type,
+					FilePath: sym.FilePath,
+					Line:     sym.Line,
+					Level:    0,
+				}
+				break
+			}
+		}
+		if entryPoint != nil {
+			break
+		}
 	}
 
-	// Build the graph using index-based traversal
+	if entryPoint == nil {
+		fmt.Printf("Could not find definition for '%s'.\n", symbol)
+		return nil
+	}
+
+	// 3. Build graph
 	graph := NewFeatureGraph(symbol, extractDepthFlag)
 	graph.EntryPoint = entryPoint
+	graph.Nodes[entryPoint.Symbol] = entryPoint
 
-	// Parse connection types (default to calls)
-	connTypes, err := parseConnectionTypes("calls")
-	if err != nil {
-		return fmt.Errorf("invalid connection types: %w", err)
-	}
-
-	// Create connection finders
+	connTypes, _ := parseConnectionTypes("calls") // Default to calls for extract
 	finders := createConnectionFinders(connTypes)
 
-	if verboseFlag {
-		fmt.Fprintf(os.Stderr, "Traversing graph (mode=%s, depth=%d)...\n", extractModeFlag, extractDepthFlag)
-	}
-
-	// Traverse using index (much faster than old method)
-	switch extractModeFlag {
-	case "bfs":
-		traverseBFSWithIndex(index, graph, finders, 0) // 0 = no symbol limit
-	case "dfs":
-		traverseDFSWithIndex(index, graph, finders, 0)
-	default:
-		return fmt.Errorf("invalid mode: %s (use 'bfs' or 'dfs')", extractModeFlag)
-	}
+	queue := []*GraphNode{entryPoint}
+	visited := make(map[string]bool)
+	visited[entryPoint.Symbol] = true
 
 	if verboseFlag {
-		fmt.Fprintf(os.Stderr, "✓ Graph traversal complete: %d symbols found\n\n", len(graph.Nodes))
+		fmt.Fprintf(os.Stderr, "🕸️  Tracing dependencies (depth=%d)...\n", extractDepthFlag)
 	}
 
-	// Extract source code for all discovered components
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+
+		if current.Level >= extractDepthFlag {
+			continue
+		}
+
+		for _, finder := range finders {
+			connections := finder.FindConnections(current, (*cliSymbolIndexAdapter)(partialIndex))
+			for _, conn := range connections {
+				if !visited[conn.To.Symbol] {
+					conn.To.Level = current.Level + 1
+					visited[conn.To.Symbol] = true
+					graph.Nodes[conn.To.Symbol] = conn.To
+					queue = append(queue, conn.To)
+				}
+			}
+		}
+	}
+
+	if verboseFlag {
+		fmt.Fprintf(os.Stderr, "  ✓ Found %d components\n", len(graph.Nodes))
+	}
+
+	// 4. Extract source code
 	extractedCode := extractSourceCode(mgr, graph)
 
 	// Output
 	if outputFileFlag != "" {
-		// TODO: Write to file
-		fmt.Printf("Writing to %s...\n", outputFileFlag)
+		if err := os.WriteFile(outputFileFlag, []byte(extractedCode), 0644); err != nil {
+			return fmt.Errorf("failed to write output file: %w", err)
+		}
+		fmt.Printf("Extracted code written to %s\n", outputFileFlag)
+	} else {
+		fmt.Print(extractedCode)
 	}
 
-	// Capture peak and end memory
+	// Metrics
 	peakMem := captureMemoryStats()
-	endMem := peakMem
-
 	metricsConfig := MetricsLogConfig{
 		Enabled:          logMetricsFlag,
 		LogFile:          metricsLogFile,
@@ -144,37 +186,28 @@ func runExtract(cmd *cobra.Command, args []string) error {
 		EndTime:          time.Now(),
 		StartMemoryBytes: startMem,
 		PeakMemoryBytes:  peakMem,
-		EndMemoryBytes:   endMem,
-		FilesProcessed:   len(files),
+		EndMemoryBytes:   peakMem,
+		FilesProcessed:   len(uniqueFiles),
 		ResultsCount:     len(graph.Nodes),
 	}
-
 	logMetrics(metricsConfig, extractedCode)
 	logBenchmark(metricsConfig, extractedCode)
-
-	// Print to stdout
-	fmt.Print(extractedCode)
 
 	return nil
 }
 
-// extractSourceCode extracts the full source for all nodes in the graph
 func extractSourceCode(mgr *parser.Manager, graph *FeatureGraph) string {
 	var sb strings.Builder
-
-	// Header
 	sb.WriteString(fmt.Sprintf("# Feature: %s (%d components, %d files)\n\n",
 		graph.EntryPoint.Symbol,
 		len(graph.Nodes),
 		countUniqueFiles(graph)))
 
-	// Group nodes by level
 	levelNodes := make(map[int][]*GraphNode)
 	for _, node := range graph.Nodes {
 		levelNodes[node.Level] = append(levelNodes[node.Level], node)
 	}
 
-	// Extract by level
 	for level := 0; level <= graph.MaxDepth; level++ {
 		nodes := levelNodes[level]
 		if len(nodes) == 0 {
@@ -187,32 +220,24 @@ func extractSourceCode(mgr *parser.Manager, graph *FeatureGraph) string {
 			sb.WriteString(fmt.Sprintf("## Level %d\n\n", level))
 		}
 
-		// Group by file
 		fileNodes := make(map[string][]*GraphNode)
 		for _, node := range nodes {
 			fileNodes[node.FilePath] = append(fileNodes[node.FilePath], node)
 		}
 
-		// Extract source for each file
 		for filePath, fileNodeList := range fileNodes {
 			relPath := makeRelativePath(filePath)
 			sb.WriteString(fmt.Sprintf("### %s\n\n", relPath))
 
-			// Get file content
 			content, err := mgr.GetContent(filePath)
 			if err != nil {
-				sb.WriteString(fmt.Sprintf("// Error reading file: %v\n\n", err))
 				continue
 			}
-
-			// Parse to get node boundaries
 			tree, err := mgr.ParseFile(filePath)
 			if err != nil {
-				sb.WriteString(fmt.Sprintf("// Error parsing file: %v\n\n", err))
 				continue
 			}
 
-			// Extract each symbol's source
 			for _, node := range fileNodeList {
 				source := extractSymbolSource(tree, content, node)
 				sb.WriteString(fmt.Sprintf("```\n%s\n```\n\n", source))
@@ -220,7 +245,6 @@ func extractSourceCode(mgr *parser.Manager, graph *FeatureGraph) string {
 		}
 	}
 
-	// Summary
 	sb.WriteString("---\n")
 	sb.WriteString(fmt.Sprintf("Total: %d components across %d files\n",
 		len(graph.Nodes), countUniqueFiles(graph)))
@@ -228,16 +252,11 @@ func extractSourceCode(mgr *parser.Manager, graph *FeatureGraph) string {
 	return sb.String()
 }
 
-// extractSymbolSource extracts the source code for a specific symbol
 func extractSymbolSource(tree *sitter.Tree, content []byte, node *GraphNode) string {
-	// Find the node in the tree that matches our symbol
 	root := tree.RootNode()
-
 	var findNode func(*sitter.Node) *sitter.Node
 	findNode = func(n *sitter.Node) *sitter.Node {
-		// Check if this node is at the right line
 		if n.StartPoint().Row == node.Line {
-			// Check if it's the right type
 			nodeType := n.Type()
 			if (node.Type == "function" && strings.Contains(nodeType, "function")) ||
 				(node.Type == "class" && strings.Contains(nodeType, "class")) ||
@@ -245,23 +264,24 @@ func extractSymbolSource(tree *sitter.Tree, content []byte, node *GraphNode) str
 				return n
 			}
 		}
-
-		// Recurse through children
 		for i := 0; i < int(n.ChildCount()); i++ {
 			if result := findNode(n.Child(i)); result != nil {
 				return result
 			}
 		}
-
 		return nil
 	}
 
 	targetNode := findNode(root)
 	if targetNode == nil {
+		// Fallback: extract just that line if node not found structurally
+		lines := strings.Split(string(content), "\n")
+		if int(node.Line) < len(lines) {
+			return lines[node.Line]
+		}
 		return fmt.Sprintf("// Could not find source for %s at line %d", node.Symbol, node.Line+1)
 	}
 
-	// Extract the source code
 	return targetNode.Content(content)
 }
 

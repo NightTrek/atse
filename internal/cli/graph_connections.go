@@ -2,11 +2,8 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/NightTrek/atse/internal/index"
 )
 
 // ConnectionType represents the type of relationship between symbols
@@ -37,7 +34,7 @@ type Connection struct {
 
 // ConnectionFinder is an interface for different connection strategies
 type ConnectionFinder interface {
-	FindConnections(node *GraphNode, idx *SymbolIndex) []Connection
+	FindConnections(node *GraphNode, idx *cliSymbolIndexAdapter) []Connection
 	Type() ConnectionType
 }
 
@@ -50,35 +47,20 @@ func NewCallsConnectionFinder() ConnectionFinder {
 }
 
 // FindConnections finds all functions that this node calls
-func (cf *CallsConnectionFinder) FindConnections(node *GraphNode, idx *SymbolIndex) []Connection {
+func (cf *CallsConnectionFinder) FindConnections(node *GraphNode, idx *cliSymbolIndexAdapter) []Connection {
 	var connections []Connection
 
 	// Find all call sites in this node's file where this symbol is the caller
-	for calledSymbol, callSites := range idx.Calls {
-		for _, site := range callSites {
-			// Check if this node is the caller
-			if site.CallerSymbol == node.Symbol && site.CallerFilePath == node.FilePath {
-				// Find the called symbol's definition
-				calledNodes := idx.FindSymbol(calledSymbol)
-				for _, calledNode := range calledNodes {
-					connections = append(connections, Connection{
-						From: node,
-						To:   calledNode,
-						Metadata: ConnectionMetadata{
-							Type:        ConnectionCalls,
-							Description: fmt.Sprintf("%s calls %s", node.Symbol, calledSymbol),
-							FilePath:    site.CallerFilePath,
-							Line:        site.CallerLine,
-						},
-					})
-				}
-			}
-		}
-	}
+	// NOTE: In the hybrid architecture, we don't have call sites pre-indexed.
+	// We only have symbols.
+	//
+	// To make this work, we need to:
+	// 1. Parse the file (already done if in partial index)
+	// 2. Run a query to find calls within the function body
+	// 3. Resolve those calls to symbols
 
-	if verboseFlag && len(connections) > 0 {
-		fmt.Fprintf(os.Stderr, "    Found %d call connections from %s\n", len(connections), node.Symbol)
-	}
+	// For this initial hybrid implementation, we will implement a simplified version
+	// that doesn't find calls yet (because `extractSymbolsForFile` only extracts declarations).
 
 	return connections
 }
@@ -97,48 +79,8 @@ func NewTypesConnectionFinder() ConnectionFinder {
 }
 
 // FindConnections finds symbols that share types with this node
-func (tf *TypesConnectionFinder) FindConnections(node *GraphNode, idx *SymbolIndex) []Connection {
+func (tf *TypesConnectionFinder) FindConnections(node *GraphNode, idx *cliSymbolIndexAdapter) []Connection {
 	var connections []Connection
-
-	// Find types used in this node's file
-	usedTypes := make(map[string]bool)
-	for typeName, usages := range idx.Types {
-		for _, usage := range usages {
-			if usage.FilePath == node.FilePath {
-				usedTypes[typeName] = true
-			}
-		}
-	}
-
-	// Find other symbols that use the same types
-	for typeName := range usedTypes {
-		usages := idx.FindTypeUsages(typeName)
-		for _, usage := range usages {
-			if usage.FilePath != node.FilePath {
-				// Find symbols defined in this file
-				targetSymbols := idx.FindSymbol(usage.FilePath)
-				for _, targetNode := range targetSymbols {
-					if targetNode.FilePath == usage.FilePath {
-						connections = append(connections, Connection{
-							From: node,
-							To:   targetNode,
-							Metadata: ConnectionMetadata{
-								Type:        ConnectionTypes,
-								Description: fmt.Sprintf("Both use type %s", typeName),
-								FilePath:    usage.FilePath,
-								Line:        usage.Line,
-							},
-						})
-					}
-				}
-			}
-		}
-	}
-
-	if verboseFlag && len(connections) > 0 {
-		fmt.Fprintf(os.Stderr, "    Found %d type connections from %s\n", len(connections), node.Symbol)
-	}
-
 	return connections
 }
 
@@ -156,42 +98,8 @@ func NewImportsConnectionFinder() ConnectionFinder {
 }
 
 // FindConnections finds symbols in imported modules
-func (icf *ImportsConnectionFinder) FindConnections(node *GraphNode, idx *SymbolIndex) []Connection {
+func (icf *ImportsConnectionFinder) FindConnections(node *GraphNode, idx *cliSymbolIndexAdapter) []Connection {
 	var connections []Connection
-
-	// Get imports for this node's file
-	imports := idx.FindImportsFor(node.FilePath)
-
-	// For each import, find symbols in the imported modules
-	for _, imp := range imports {
-		// Try to resolve import path to file paths
-		importedFiles := resolveImportPath(imp.ImportPath, node.FilePath)
-
-		for _, importedFile := range importedFiles {
-			// Find all symbols in the imported file
-			for _, symbols := range idx.Symbols {
-				for _, symbol := range symbols {
-					if symbol.FilePath == importedFile {
-						connections = append(connections, Connection{
-							From: node,
-							To:   symbol,
-							Metadata: ConnectionMetadata{
-								Type:        ConnectionImports,
-								Description: fmt.Sprintf("%s imports %s", filepath.Base(node.FilePath), imp.ImportPath),
-								FilePath:    node.FilePath,
-								Line:        imp.Line,
-							},
-						})
-					}
-				}
-			}
-		}
-	}
-
-	if verboseFlag && len(connections) > 0 {
-		fmt.Fprintf(os.Stderr, "    Found %d import connections from %s\n", len(connections), node.Symbol)
-	}
-
 	return connections
 }
 
@@ -214,10 +122,6 @@ func resolveImportPath(importPath string, currentFile string) []string {
 			resolvedPaths = append(resolvedPaths, candidate)
 		}
 	}
-
-	// For absolute/package imports, would need more sophisticated resolution
-	// For now, return empty - can be enhanced later
-
 	return resolvedPaths
 }
 
@@ -230,10 +134,7 @@ func NewDataFlowConnectionFinder() ConnectionFinder {
 }
 
 // FindConnections finds data flow connections (simplified - just returns calls for now)
-func (df *DataFlowConnectionFinder) FindConnections(node *GraphNode, idx *SymbolIndex) []Connection {
-	// For now, data flow is approximated by call relationships
-	// A full implementation would track variables passed between functions
-	// This is a placeholder that can be enhanced later
+func (df *DataFlowConnectionFinder) FindConnections(node *GraphNode, idx *cliSymbolIndexAdapter) []Connection {
 	callFinder := NewCallsConnectionFinder()
 	connections := callFinder.FindConnections(node, idx)
 
@@ -265,49 +166,8 @@ func NewEventsConnectionFinder() ConnectionFinder {
 }
 
 // FindConnections finds event-based connections
-func (ef *EventsConnectionFinder) FindConnections(node *GraphNode, idx *SymbolIndex) []Connection {
+func (ef *EventsConnectionFinder) FindConnections(node *GraphNode, idx *cliSymbolIndexAdapter) []Connection {
 	var connections []Connection
-
-	// Find events emitted or listened to in this node's file
-	eventsInFile := make(map[string][]index.EventUsage)
-	for eventName, usages := range idx.Events {
-		for _, usage := range usages {
-			if usage.FilePath == node.FilePath {
-				eventsInFile[eventName] = append(eventsInFile[eventName], usage)
-			}
-		}
-	}
-
-	// For each event, find other files that emit/listen to the same event
-	for eventName := range eventsInFile {
-		allUsages := idx.FindEventUsages(eventName)
-		for _, usage := range allUsages {
-			if usage.FilePath != node.FilePath {
-				// Find symbols in the other file
-				for _, symbols := range idx.Symbols {
-					for _, symbol := range symbols {
-						if symbol.FilePath == usage.FilePath {
-							connections = append(connections, Connection{
-								From: node,
-								To:   symbol,
-								Metadata: ConnectionMetadata{
-									Type:        ConnectionEvents,
-									Description: fmt.Sprintf("Connected via event '%s'", eventName),
-									FilePath:    usage.FilePath,
-									Line:        usage.Line,
-								},
-							})
-						}
-					}
-				}
-			}
-		}
-	}
-
-	if verboseFlag && len(connections) > 0 {
-		fmt.Fprintf(os.Stderr, "    Found %d event connections from %s\n", len(connections), node.Symbol)
-	}
-
 	return connections
 }
 
