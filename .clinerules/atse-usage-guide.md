@@ -5,30 +5,25 @@ This rule provides comprehensive guidelines for AI agents using the ATSE (Agent 
 ## Quick reference guide
 
 **Available Commands (in recommended order):**
-1. `atse search <query> [path]` - Fuzzy search for symbols (functions, classes, methods)
-2. `atse graph <symbol> [path]` - Build dependency graph with BFS/DFS traversal
+1. `atse search <query> [path]` - Hybrid search for symbols (ripgrep + tree-sitter)
+2. `atse graph <symbol> [path]` - Build dependency graph with lazy expansion
 3. `atse extract <symbol> [path]` - Extract full source code for a feature
 4. `atse find-fn <function> [path]` - Find all calls to a specific function
-5. `atse list-fns [path]` - List all function declarations
-6. `atse deps [path]` - Show dependencies (imports)
-7. `atse context <file:line:col>` - Get code context at a position
-8. `atse query <tree-sitter-query> [path]` - Execute raw Tree-sitter queries
+5. `atse context <file:line:col>` - Get code context at a position
 
-**Global Flags:**
+**Simplified Global Flags:**
 - `--format <text|json|locations>` - Output format
 - `--limit <n>` - Limit number of results
-- `--depth <n>` - Maximum traversal depth (graph/extract)
-- `--mode <bfs|dfs>` - Traversal mode (graph/extract)
 - `--verbose, -v` - Include additional context
-- `--recursive, -r` - Recursively search directories (default: true)
 - `--include <pattern>` - Include file patterns (e.g., "*.ts")
 - `--exclude <pattern>` - Exclude file patterns (e.g., "*.test.ts")
+- `--benchmark` - Display performance summary
 
-**Performance Monitoring Flags:**
-- `--benchmark` - Display performance summary to stderr (duration, memory, files processed, results count, tokens)
-- `--log-metrics` - Log performance metrics to JSONL file for historical tracking
-- `--metrics-log-file <path>` - Custom path for metrics log (default: benchmark/results/raw/token_metrics.jsonl)
-- `--token-model <model>` - Token counting model name (default: gpt-4o)
+**Removed Flags:**
+- `--recursive` - Always recursive
+- `--production-only` - Use exclude
+- `--include-tests` - Use include
+- `--rebuild-index` - No longer needed with hybrid architecture
 
 ## Recommended workflow
 
@@ -50,9 +45,7 @@ This rule provides comprehensive guidelines for AI agents using the ATSE (Agent 
 
 **Step 4: Detailed Analysis (other commands)**
 - `find-fn` for finding specific function calls
-- `deps` for understanding import relationships
 - `context` for getting surrounding code at specific locations
-- `query` for advanced Tree-sitter pattern matching
 
 ## System prompt approach
 
@@ -100,7 +93,7 @@ Use JSON format for programmatic processing of results.
 
 **Approach:**
 ```
-atse deps ./src/services/payment.ts --verbose
+rg "^import" ./src/services/payment.ts
 ```
 
 ### Use Case 4: Code refactoring preparation
@@ -152,170 +145,6 @@ Output Chars:     145
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-**Key Metrics Tracked:**
-- **Duration**: Execution time in seconds (ms precision)
-- **Memory Usage**: Start, peak, and end memory in MB
-- **Files Processed**: Number of files analyzed
-- **Results Found**: Number of symbols/matches returned
-- **Output Tokens**: Token count for LLM context sizing
-- **Output Chars**: Character count
-
-### Using --log-metrics flag
-
-The `--log-metrics` flag appends performance data to a JSONL file for historical analysis:
-
-```bash
-atse graph AuthService ./src --log-metrics
-```
-
-**JSONL Entry Format:**
-```json
-{
-  "timestamp": "2025-11-15T08:10:29.296742Z",
-  "command": "graph",
-  "args": ["graph", "AuthService", "./src"],
-  "exit_code": 0,
-  "execution_duration_ms": 1247,
-  "memory_start_mb": 12.3,
-  "memory_peak_mb": 52.1,
-  "memory_end_mb": 45.3,
-  "files_processed": 127,
-  "results_count": 23,
-  "output_token_count": 42,
-  "output_char_count": 145,
-  "model": "gpt-4o",
-  "output_format": "text",
-  "version": "0.1.0"
-}
-```
-
-### Combined Usage
-
-Use both flags together for immediate feedback and historical tracking:
-
-```bash
-atse graph AuthService ./src --benchmark --log-metrics
-```
-
-### Benchmarking Workflow
-
-**For comparing command performance:**
-```bash
-# Benchmark different depth settings
-atse graph AuthService ./src --depth 1 --benchmark
-atse graph AuthService ./src --depth 2 --benchmark
-atse graph AuthService ./src --depth 3 --benchmark
-
-# Compare BFS vs DFS traversal
-atse graph AuthService ./src --mode bfs --benchmark
-atse graph AuthService ./src --mode dfs --benchmark
-```
-
-**For tracking improvements over time:**
-```bash
-# Log metrics before optimization
-atse graph AuthService ./src --log-metrics
-
-# ... make code improvements ...
-
-# Log metrics after optimization
-atse graph AuthService ./src --log-metrics
-
-# Analyze the JSONL file to compare
-jq 'select(.command=="graph") | {duration: .execution_duration_ms, memory: .memory_peak_mb}' \
-  benchmark/results/raw/token_metrics.jsonl
-```
-
-### AI Agent Recommendations
-
-When using ATSE as an AI agent:
-
-1. **Use --benchmark for immediate insight**: When exploring a codebase, add `--benchmark` to understand command performance and adjust parameters accordingly
-2. **Monitor memory usage**: If memory usage is high (>100 MB), reduce `--depth` or scope to specific directories
-3. **Track token counts**: Use token count to estimate LLM context window usage before sending results
-4. **Compare alternatives**: Benchmark different approaches (e.g., search vs. graph) to find the most efficient solution
-
-### Performance Analysis Examples
-
-**Analyzing slow commands:**
-```bash
-# If a graph command is slow, reduce depth
-atse graph LargeService ./src --depth 1 --benchmark  # Try depth 1 first
-
-# Or scope to specific files
-atse graph LargeService ./src --include "*.ts" --exclude "*.test.*" --benchmark
-```
-
-**Tracking optimization impact:**
-```bash
-# Before optimization
-atse search authenticate ./src --log-metrics --benchmark
-
-# After adding indexes or caching
-atse search authenticate ./src --log-metrics --benchmark
-
-# Compare results
-tail -2 benchmark/results/raw/token_metrics.jsonl | jq .execution_duration_ms
-```
-
-## Performance optimization tips
-
-**For large codebases (10,000+ files):**
-- Always use `--include` to filter by file type: `--include "*.go"`
-- Use `--exclude` to skip test files: `--exclude "*.test.*"`
-- Keep `--depth` low (1-2) for graph and extract commands
-- Use `--limit` to cap results at reasonable numbers (10-50)
-- Scope searches to specific directories rather than project root
-
-**For graph/extract timeouts:**
-- Reduce `--depth` parameter
-- Use more specific symbol names
-- Search within single files rather than entire directories
-- Consider using `find-fn` or `search` as alternatives for simpler queries
-
-## Integration with chain of thought
-
-When using ATSE in complex analysis tasks, structure your thinking:
-
-```
-<thinking>
-1. What is the core question I need to answer?
-2. What ATSE command best addresses this question?
-3. What parameters optimize for my specific need?
-4. What do the results tell me?
-5. Do I need follow-up commands?
-</thinking>
-
-<action>
-[Execute ATSE command with specific parameters]
-</action>
-
-<analysis>
-[Interpret results and determine next steps]
-</analysis>
-```
-
-## Error handling and debugging
-
-**Common issues and solutions:**
-
-1. **Command times out:**
-   - Reduce --depth or --limit
-   - Scope to specific directories
-   - Use simpler commands (search instead of graph)
-
-2. **No results found:**
-   - Check capitalization (symbol names are case-sensitive)
-   - Try --fuzzy flag with search
-   - Verify file patterns with --include match your target language
-   - Use --verbose to see what files are being processed
-
-3. **Too many results:**
-   - Add --limit flag
-   - Use --include/--exclude for file filtering
-   - Be more specific with symbol names
-   - Use --type flag with search command
-
 ## Iterative learning section
 
 **How to add learnings:**
@@ -332,45 +161,17 @@ When you discover a pattern that works particularly well or avoid a pitfall, add
 
 ---
 
-### 2025-11-13 - Initial Comprehensive Testing Complete
-**Context**: Tested all 8 ATSE commands against dgraph repository (large production Go codebase)
-**Pattern**: Following the recommended workflow (search → graph → extract → detailed analysis) provided the most effective understanding of features
-**Result**: All commands work reliably with appropriate parameter tuning
+### 2025-11-21 - Hybrid Architecture Upgrade (Massive Scale Support)
+**Context**: Scaling to 4,000+ files and monorepos.
+**Pattern**: Replaced full indexing with hybrid ripgrep + Tree-sitter lazy loading.
+**Result**: 
+- **Search**: Instant (500ms) results from ripgrep, structured parse on-demand
+- **Graph/Extract**: Lazy expansion means only relevant files are parsed
+- **Memory**: Dropped from GBs to MBs for large repos
 **Recommendation**: 
-- For graph command on large codebases, start with --depth 1-2
-- search command with --limit 5-10 is perfect for initial exploration
-- extract command requires modest depth (1-2) to avoid extremely large outputs
-- Always scope large codebase analysis to specific directories when possible
-
-### 2025-11-15 - Performance Monitoring System Added
-**Context**: Added comprehensive performance monitoring to track execution time, memory usage, and workload metrics
-**Pattern**: Using `--benchmark` flag provides immediate performance feedback; `--log-metrics` enables historical tracking
-**Result**: Can now benchmark command performance and identify optimization opportunities
-**Recommendation**:
-- Always use `--benchmark` when testing different parameter combinations (depth, mode, filters)
-- Use `--log-metrics` to track performance improvements over time
-- Monitor memory peak to detect when commands might timeout or use excessive resources
-- Token counts help estimate LLM context window usage before sending large outputs
-- Fast commands (<100ms) are ideal for iterative exploration; slower commands (>1s) may need parameter tuning
-
-### 2025-11-15 - Graph Command Enhanced with Symbol Indexing (CRITICAL FIX)
-**Context**: Graph command was hanging indefinitely on large codebases (500+ files) due to O(n²) file searching complexity
-**Pattern**: Implemented upfront symbol indexing that parses all files once, then uses O(1) lookups for graph traversal
-**Result**: Graph command now handles any sized codebase efficiently:
-- **Before**: Hung on dgraph repo (547 files)
-- **After**: Completes in 2.5s with full progress visibility
-**New Features**:
-- `--connection-types <calls|types|imports|dataflow|events|all>` - Choose which relationships to follow (default: calls)
-- `--max-symbols <n>` - Limit symbol discovery to prevent runaway (default: 500, use 0 for unlimited)
-- `--verbose` now shows index building progress (every 50 files) and traversal progress (each symbol)
-**Recommendation**:
-- **Always use `--verbose` on large codebases** to see progress and confirm it's working
-- For initial exploration: `atse graph <symbol> <path> --depth 1 --verbose --benchmark`
-- For deep analysis: increase depth gradually while monitoring with `--benchmark`
-- Use `--max-symbols` to control scope: smaller for quick checks, larger for comprehensive analysis
-- On huge codebases (1000+ files): scope to specific directories or use `--include "*.go"` filters
-- The command no longer hangs - if it seems slow, `--verbose` will show it's making progress
-**Performance**: 547 files indexed in ~2.5s, 31MB peak memory, scales linearly
+- Ensure `rg` is installed
+- Use ATSE for structural analysis, but prefer `rg` for simple text search
+- Hybrid mode is automatic - just use commands as normal
 
 ### [Add your learnings below]
 
