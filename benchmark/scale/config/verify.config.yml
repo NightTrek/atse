@@ -1,12 +1,16 @@
-# Verification Test Configuration (Small subset)
+# Verification Test Configuration
 
 size_categories:
   - name: "tiny"
     file_count: 100
-    iterations: 1 # Just 1 iteration for verification
+    iterations: 1 
     
   - name: "small"
     file_count: 1000
+    iterations: 1
+
+  - name: "medium"
+    file_count: 10000
     iterations: 1
 
 test_queries:
@@ -21,3 +25,6 @@ timeouts:
   tiny: 30
   small: 60
   medium: 300
+  large: 1800
+  huge: 3600
+  massive: 7200

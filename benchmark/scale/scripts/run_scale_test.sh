@@ -2,7 +2,7 @@
 set -e
 
 # Configuration
-CONFIG_FILE="benchmark/scale/config/scale.config.yml"
+CONFIG_FILE="benchmark/scale/config/verify.config.yml"
 DATASET_DIR="benchmark/scale/datasets"
 RESULTS_DIR="benchmark/scale/results"
 RAW_DIR="$RESULTS_DIR/raw"
