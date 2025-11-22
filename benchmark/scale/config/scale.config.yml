@@ -1,0 +1,61 @@
+# Scalability Test Configuration
+
+# Size Categories (logarithmic scale)
+size_categories:
+  - name: "tiny"
+    file_count: 100
+    iterations: 5
+    
+  - name: "small"
+    file_count: 1000
+    iterations: 5
+    
+  - name: "medium"
+    file_count: 10000
+    iterations: 5
+    
+  - name: "large"
+    file_count: 100000
+    iterations: 3
+    
+  - name: "huge"
+    file_count: 1000000
+    iterations: 3
+    
+  - name: "massive"
+    file_count: 10000000
+    iterations: 1
+
+# Test Queries needed to test different search behaviors
+test_queries:
+  - type: "exact_match"
+    query: "GenericAuthService"
+    description: "Find exact function name"
+    
+  - type: "fuzzy_match"
+    query: "services"
+    fuzzy: true
+    description: "Fuzzy search across many symbols"
+    
+  - type: "common_pattern"
+    query: "ProcessRequest"
+    description: "Common pattern (many matches)"
+    
+  - type: "rare_pattern"
+    query: "DepreciatedLegacyFunctionXYZ"
+    description: "Rare pattern (few matches)"
+
+# Languages to generate
+languages:
+  - go
+  - typescript
+  - python
+  
+# Timeouts per size category (in seconds)
+timeouts:
+  tiny: 30
+  small: 60
+  medium: 300
+  large: 1800
+  huge: 3600
+  massive: 7200

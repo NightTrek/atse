@@ -1,0 +1,23 @@
+# Verification Test Configuration (Small subset)
+
+size_categories:
+  - name: "tiny"
+    file_count: 100
+    iterations: 1 # Just 1 iteration for verification
+    
+  - name: "small"
+    file_count: 1000
+    iterations: 1
+
+test_queries:
+  - type: "exact_match"
+    query: "GenericAuthService"
+    description: "Find exact function name"
+
+languages:
+  - go
+  
+timeouts:
+  tiny: 30
+  small: 60
+  medium: 300

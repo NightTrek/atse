@@ -1,39 +1,27 @@
 # Binaries
 atse
-*.exe
-*.dll
-*.so
-*.dylib
+benchmark/scale/datasets/generate_synthetic
 
-# Test binary, built with `go test -c`
-*.test
-
-# Output of the go coverage tool
-*.out
-
-# Go workspace file
-go.work
-
-# Dependency directories
-vendor/
-
-# IDE
+# Development
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
+
+# Go
+go.work
+go.work.sum
+
+# Benchmark Results & Data
+benchmark/results/raw/
+benchmark/results/cloud_raw/
+benchmark/results/summaries/
+benchmark/scale/datasets/*/
+benchmark/scale/results/
+benchmark/scale/venv/
+
+# Node
+node_modules/
 
 # OS
 .DS_Store
-Thumbs.db
-
-# Cache
-.atse-cache/
-*.cache
-
-# Build artifacts
-dist/
-build/
-
-tests/repos/**/*
