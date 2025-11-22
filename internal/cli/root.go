@@ -31,21 +31,21 @@ var version = "dev"
 
 var rootCmd = &cobra.Command{
 	Use:   "atse",
-	Short: "Agent Tree Search - A Tree-sitter powered CLI for code analysis",
-	Long: `atse (Agent Tree Search) is a command-line tool that uses Tree-sitter
-to provide fast, accurate structural code analysis.
+	Short: "Tree-sitter powered code analysis - fast, accurate, zero false positives",
+	Long: `atse (Agent Tree Search) is a Tree-sitter powered CLI for code analysis.
 
-It helps developers and AI agents understand large codebases through:
-- Structural code search (syntax-aware, zero false positives)
-- Dependency graph analysis and visualization
-- Source code extraction by feature/dependency
-- Function call finding with zero false positives
+Recommended workflow:
+  1. search - Find entry points (functions, classes, symbols)
+  2. graph - Analyze dependencies and identify impact
+  3. extract/context - Pull relevant code for your analysis
 
-Examples:
-  atse search authenticate ./src
-  atse graph AuthService ./src
-  atse extract AuthService ./src
-  atse find-fn authenticate ./src
+Fast hybrid approach: ripgrep for discovery + Tree-sitter for accuracy.`,
+	Example: `  # Typical workflow:
+  atse search authenticate ./src         # 1. Find entry point
+  atse graph AuthService ./src           # 2. Analyze dependencies
+  atse extract AuthService ./src         # 3. Get full source code
+
+  # Or pinpoint specific code:
   atse context ./src/api.ts:42:10`,
 	Version: version,
 }
@@ -58,19 +58,23 @@ func init() {
 	rootCmd.PersistentFlags().StringSliceVar(&excludeFlag, "exclude", []string{}, "Exclude file patterns (e.g., '*.test.ts')")
 	rootCmd.PersistentFlags().IntVar(&limitFlag, "limit", 0, "Limit number of results (0 = no limit)")
 
-	// Advanced flags
-	rootCmd.PersistentFlags().BoolVar(&benchmarkFlag, "benchmark", false, "Display performance benchmark summary to stderr")
+	// Advanced flags (Hidden from default help)
+	rootCmd.PersistentFlags().BoolVarP(&benchmarkFlag, "benchmark", "b", false, "Display performance benchmark summary to stderr")
 	rootCmd.PersistentFlags().BoolVar(&logMetricsFlag, "log-metrics", false, "Log command output token metrics to a JSONL file")
+	rootCmd.PersistentFlags().BoolVar(&logMetricsFlag, "log", false, "Alias for --log-metrics") // Alias using same variable
 	rootCmd.PersistentFlags().BoolVar(&noCacheFlag, "no-cache", false, "Bypass parser cache")
 
 	// Hidden flags (for debugging or specific CI setups)
 	rootCmd.PersistentFlags().StringVar(&metricsLogFile, "metrics-log-file", "benchmark/results/raw/token_metrics.jsonl", "Path for metrics logs")
 	rootCmd.PersistentFlags().StringVar(&tokenModelFlag, "token-model", "gpt-4o", "Model name for token counting")
 
-	// Hide flags that most users don't need
+	// Hide flags that most users don't need to see immediately
+	rootCmd.PersistentFlags().MarkHidden("benchmark")
+	rootCmd.PersistentFlags().MarkHidden("log-metrics")
+	rootCmd.PersistentFlags().MarkHidden("log")
+	rootCmd.PersistentFlags().MarkHidden("no-cache")
 	rootCmd.PersistentFlags().MarkHidden("metrics-log-file")
 	rootCmd.PersistentFlags().MarkHidden("token-model")
-	rootCmd.PersistentFlags().MarkHidden("no-cache")
 }
 
 // Execute runs the root command

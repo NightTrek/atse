@@ -17,6 +17,8 @@ REPO="NightTrek/atse"
 BINARY_NAME="atse"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 FALLBACK_INSTALL_DIR="$HOME/.local/bin"
+MAN_INSTALL_DIR="/usr/local/share/man/man1"
+FALLBACK_MAN_INSTALL_DIR="$HOME/.local/share/man/man1"
 
 # Functions
 print_info() {
@@ -160,9 +162,58 @@ install_binary() {
             print_success "Installed to ${FALLBACK_INSTALL_DIR}/${BINARY_NAME}"
         fi
     fi
+
+    # Install main page
+    install_manpage
     
     # Cleanup
     rm -rf "$(dirname "$BINARY_PATH")"
+}
+
+install_manpage() {
+    print_info "Installing man page..."
+    
+    # Locate man page in extracted directory (handles structure variations)
+    local man_file=$(find "$(dirname "$BINARY_PATH")" -name "atse.1" -type f | head -n 1)
+    
+    if [ -z "$man_file" ]; then
+        print_warning "Man page not found in archive. Skipping man page installation."
+        return
+    fi
+    
+    local target_man_dir=""
+    
+    # Check if we installed to /usr/local/bin (system install)
+    if [[ "$FINAL_INSTALL_DIR" == "/usr/local/bin" ]]; then
+        target_man_dir="$MAN_INSTALL_DIR"
+        
+        if [ -w "$(dirname "$target_man_dir")" ]; then
+            mkdir -p "$target_man_dir"
+            cp "$man_file" "$target_man_dir/atse.1"
+            chmod 644 "$target_man_dir/atse.1"
+            print_success "Man page installed to $target_man_dir/atse.1"
+        elif command -v sudo >/dev/null 2>&1; then
+             # Try sudo
+            sudo mkdir -p "$target_man_dir"
+            sudo cp "$man_file" "$target_man_dir/atse.1"
+            sudo chmod 644 "$target_man_dir/atse.1"
+            print_success "Man page installed to $target_man_dir/atse.1"
+        else
+            # Fallback for system install but no permissions
+             target_man_dir="$FALLBACK_MAN_INSTALL_DIR"
+        fi
+    else
+        # User install
+        target_man_dir="$FALLBACK_MAN_INSTALL_DIR"
+    fi
+    
+    # Install to user directory if system install failed or wasn't attempted
+    if [[ "$target_man_dir" == "$FALLBACK_MAN_INSTALL_DIR" ]]; then
+        mkdir -p "$target_man_dir"
+        cp "$man_file" "$target_man_dir/atse.1"
+        chmod 644 "$target_man_dir/atse.1"
+        print_success "Man page installed to $target_man_dir/atse.1"
+    fi
 }
 
 setup_path() {
@@ -257,7 +308,7 @@ print_next_steps() {
     
     echo "  Try it out:"
     echo "     ${YELLOW}atse --help${NC}"
-    echo "     ${YELLOW}atse search authenticate ./src${NC}"
+    echo "     ${YELLOW}man atse${NC}"
     echo ""
     echo -e "${BLUE}Documentation:${NC} https://github.com/${REPO}"
     echo ""

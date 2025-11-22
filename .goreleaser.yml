@@ -41,6 +41,7 @@ archives:
     files:
       - README.md
       - LICENSE*
+      - docs/man/atse.1
     
     # Format overrides for specific OS
     format_overrides:

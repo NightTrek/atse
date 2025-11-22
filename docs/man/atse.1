@@ -1,0 +1,149 @@
+.TH ATSE 1 "November 2025" "atse v0.2.0" "User Commands"
+.SH NAME
+atse \- Agent Tree Search Engine: Tree-sitter powered code analysis
+.SH SYNOPSIS
+.B atse
+[\fIOPTIONS\fR] \fICOMMAND\fR [\fIARGS\fR...]
+.SH DESCRIPTION
+.B atse
+is a command-line tool that uses Tree-sitter to provide fast, accurate structural code analysis. It is designed to help developers and AI agents understand large codebases by providing syntax-aware search, dependency graph analysis, and code extraction with zero false positives.
+
+It uses a hybrid approach:
+.IP \[bu] 2
+\fBripgrep\fR for fast candidate file discovery
+.IP \[bu] 2
+\fBTree-sitter\fR for accurate parsing and symbol extraction
+.SH WORKFLOW
+The recommended workflow for analyzing a new codebase or feature is:
+
+1. \fBsearch\fR - Find entry points (functions, classes, symbols)
+.br
+2. \fBgraph\fR - Analyze dependencies and identify impact
+.br
+3. \fBextract\fR (or \fBcontext\fR) - Pull relevant code for your analysis
+
+.SH COMMANDS
+.TP
+.B search \fIQUERY\fR [\fIPATH\fR]
+Search for code symbols (functions, classes, methods).
+.RS
+.IP "\fIQUERY\fR" 4
+The symbol name to search for.
+.IP "\fIPATH\fR" 4
+Directory to search in (default: ".").
+.IP "\fB--type\fR \fITYPE\fR" 4
+Filter by symbol type (function, class, method, variable).
+.IP "\fB--fuzzy\fR" 4
+Enable fuzzy matching.
+.RE
+
+.TP
+.B graph \fISYMBOL\fR [\fIPATH\fR]
+Generate a dependency graph for a symbol.
+.RS
+.IP "\fISYMBOL\fR" 4
+The entry point symbol.
+.IP "\fIPATH\fR" 4
+Directory to search in (default: ".").
+.IP "\fB--depth, -d\fR \fINT\fR" 4
+Maximum traversal depth (default: 2).
+.IP "\fB--mode\fR \fIBFS|DFS\fR" 4
+Traversal mode (default: bfs).
+.IP "\fB--bidirectional\fR" 4
+Show both dependencies (calls) and dependents (called by).
+.IP "\fB--connection-types\fR \fITYPES\fR" 4
+Comma-separated list of connection types to follow (calls, types, imports) (default: calls).
+.IP "\fB--max-symbols\fR \fINT\fR" 4
+Max symbols to index (default: 500).
+.RE
+
+.TP
+.B extract \fISYMBOL\fR [\fIPATH\fR]
+Extract full source code for a feature based on its dependency graph.
+.RS
+.IP "\fISYMBOL\fR" 4
+The entry point symbol.
+.IP "\fIPATH\fR" 4
+Directory to search in (default: ".").
+.IP "\fB--depth\fR \fINT\fR" 4
+Maximum traversal depth (default: 2).
+.IP "\fB--output\fR \fIFILE\fR" 4
+Write extracted code to file instead of stdout.
+.RE
+
+.TP
+.B context \fIFILE:LINE:COL\fR
+Get contextual code snippet around a specific position.
+.RS
+.IP "\fIFILE:LINE:COL\fR" 4
+Accurate position to retrieve context for (e.g., src/main.go:10:5).
+.RE
+
+.TP
+.B find-fn \fIFUNCTION\fR [\fIPATH\fR]
+Find all calls to a specific function with zero false positives.
+.RS
+.IP "\fIFUNCTION\fR" 4
+Function name to find calls for.
+.RE
+
+.SH OPTIONS
+.TP
+.B \-h, \-\-help
+Show help message.
+.TP
+.B \-v, \-\-verbose
+Enable verbose output with additional context.
+.TP
+.B \-\-format \fIFORMAT\fR
+Output format: \fBtext\fR, \fBjson\fR, or \fBlocations\fR (default: text).
+.TP
+.B \-\-include \fIPATTERN\fR
+Include file patterns (e.g., "*.ts"). Can be specified multiple times.
+.TP
+.B \-\-exclude \fIPATTERN\fR
+Exclude file patterns (e.g., "*.test.ts"). Can be specified multiple times.
+.TP
+.B \-\-limit \fINT\fR
+Limit number of results (0 = no limit).
+
+.SS "Advanced Performance Flags"
+.TP
+.B \-b, \-\-benchmark
+Display performance benchmark summary to stderr.
+.TP
+.B \-\-log, \-\-log-metrics
+Log command output token metrics to a JSONL file.
+.TP
+.B \-\-no-cache
+Bypass parser cache.
+
+.SS "Hidden/Debug Flags"
+.TP
+.B \-\-metrics-log-file \fIFILE\fR
+Path for metrics logs (default: benchmark/results/raw/token_metrics.jsonl).
+.TP
+.B \-\-token-model \fIMODEL\fR
+Model name for token counting (default: gpt-4o).
+
+.SH EXAMPLES
+.B Typical workflow:
+.br
+  atse search authenticate ./src
+.br
+  atse graph AuthService ./src
+.br
+  atse extract AuthService ./src
+
+.B Analyze specific file:
+.br
+  atse search "user" ./src/models --include "*.go"
+
+.B Check dependencies in deep graph:
+.br
+  atse graph processPayment ./src --depth 5 --mode dfs
+
+.SH SEE ALSO
+.B rg(1)
+.SH AUTHORS
+NightTrek & Contributors.
