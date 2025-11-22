@@ -307,8 +307,8 @@ print_next_steps() {
     fi
     
     echo "  Try it out:"
-    echo "     ${YELLOW}atse --help${NC}"
-    echo "     ${YELLOW}man atse${NC}"
+    echo -e "     ${YELLOW}atse --help${NC}"
+    echo -e "     ${YELLOW}man atse${NC}"
     echo ""
     echo -e "${BLUE}Documentation:${NC} https://github.com/${REPO}"
     echo ""
