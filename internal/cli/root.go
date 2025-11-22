@@ -8,28 +8,21 @@ import (
 )
 
 var (
-	// Global flags
-	formatFlag    string
-	verboseFlag   bool
-	recursiveFlag bool
-	includeFlag   []string
-	excludeFlag   []string
-	limitFlag     int
-	noCacheFlag   bool
+	// Core flags
+	formatFlag  string
+	verboseFlag bool
+	includeFlag []string
+	excludeFlag []string
+	limitFlag   int
 
-	// Smart filtering flags
-	productionOnlyFlag   bool
-	includeTestsFlag     bool
-	includeGeneratedFlag bool
-	excludeDefaultsFlag  bool
-
-	// Performance flags
-	rebuildIndexFlag bool
-
+	// Advanced performance flags
+	noCacheFlag    bool
 	logMetricsFlag bool
+	benchmarkFlag  bool
+
+	// Hidden/Debug flags
 	metricsLogFile string
 	tokenModelFlag string
-	benchmarkFlag  bool
 )
 
 // version is the CLI version string. It defaults to "dev" but is overridden at
@@ -44,42 +37,40 @@ to provide fast, accurate structural code analysis.
 
 It helps developers and AI agents understand large codebases through:
 - Structural code search (syntax-aware, zero false positives)
-- High-level code element enumeration (functions, classes, imports)
-- Dependency analysis and context extraction
-- Raw Tree-sitter query support for power users
+- Dependency graph analysis and visualization
+- Source code extraction by feature/dependency
+- Function call finding with zero false positives
 
 Examples:
+  atse search authenticate ./src
+  atse graph AuthService ./src
+  atse extract AuthService ./src
   atse find-fn authenticate ./src
-  atse list-fns ./src/api.ts
-  atse deps ./src --format json
   atse context ./src/api.ts:42:10`,
 	Version: version,
 }
 
 func init() {
-	// Global flags available to all commands
+	// Core flags
 	rootCmd.PersistentFlags().StringVar(&formatFlag, "format", "text", "Output format: text, json, locations")
 	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "Verbose output with additional context")
-	rootCmd.PersistentFlags().BoolVarP(&recursiveFlag, "recursive", "r", true, "Recursively search directories")
 	rootCmd.PersistentFlags().StringSliceVar(&includeFlag, "include", []string{}, "Include file patterns (e.g., '*.ts')")
 	rootCmd.PersistentFlags().StringSliceVar(&excludeFlag, "exclude", []string{}, "Exclude file patterns (e.g., '*.test.ts')")
 	rootCmd.PersistentFlags().IntVar(&limitFlag, "limit", 0, "Limit number of results (0 = no limit)")
-	rootCmd.PersistentFlags().BoolVar(&noCacheFlag, "no-cache", false, "Bypass parse tree cache")
 
-	// Smart filtering flags
-	rootCmd.PersistentFlags().BoolVar(&productionOnlyFlag, "production-only", false, "Only show production code (exclude tests, generated files)")
-	rootCmd.PersistentFlags().BoolVar(&includeTestsFlag, "include-tests", false, "Include test files in results")
-	rootCmd.PersistentFlags().BoolVar(&includeGeneratedFlag, "include-generated", false, "Include generated files in results")
-	rootCmd.PersistentFlags().BoolVar(&excludeDefaultsFlag, "exclude-defaults", true, "Apply default exclude patterns for common noise (tests, generated, node_modules)")
-
-	// Performance flags
-	rootCmd.PersistentFlags().BoolVar(&rebuildIndexFlag, "rebuild-index", false, "Force rebuild of symbol index (ignore cache)")
-
-	// Metrics logging flags (token counting + JSONL logs)
-	rootCmd.PersistentFlags().BoolVar(&logMetricsFlag, "log-metrics", false, "Log command output token metrics to a JSONL file")
-	rootCmd.PersistentFlags().StringVar(&metricsLogFile, "metrics-log-file", "benchmark/results/raw/token_metrics.jsonl", "Path to append metrics logs (JSONL)")
-	rootCmd.PersistentFlags().StringVar(&tokenModelFlag, "token-model", "gpt-4o", "Model name used for token counting (for reference only)")
+	// Advanced flags
 	rootCmd.PersistentFlags().BoolVar(&benchmarkFlag, "benchmark", false, "Display performance benchmark summary to stderr")
+	rootCmd.PersistentFlags().BoolVar(&logMetricsFlag, "log-metrics", false, "Log command output token metrics to a JSONL file")
+	rootCmd.PersistentFlags().BoolVar(&noCacheFlag, "no-cache", false, "Bypass parser cache")
+
+	// Hidden flags (for debugging or specific CI setups)
+	rootCmd.PersistentFlags().StringVar(&metricsLogFile, "metrics-log-file", "benchmark/results/raw/token_metrics.jsonl", "Path for metrics logs")
+	rootCmd.PersistentFlags().StringVar(&tokenModelFlag, "token-model", "gpt-4o", "Model name for token counting")
+
+	// Hide flags that most users don't need
+	rootCmd.PersistentFlags().MarkHidden("metrics-log-file")
+	rootCmd.PersistentFlags().MarkHidden("token-model")
+	rootCmd.PersistentFlags().MarkHidden("no-cache")
 }
 
 // Execute runs the root command

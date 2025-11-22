@@ -41,7 +41,8 @@ func runFindFn(cmd *cobra.Command, args []string) error {
 	mgr := parser.New()
 
 	// Collect files
-	files, err := util.WalkFiles(path, recursiveFlag, includeFlag, excludeFlag, excludeDefaultsFlag)
+	// Always recursive and defaults excluded for better UX
+	files, err := util.WalkFiles(path, true, includeFlag, excludeFlag, true)
 	if err != nil {
 		return fmt.Errorf("failed to collect files: %w", err)
 	}
