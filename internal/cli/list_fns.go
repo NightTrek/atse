@@ -39,7 +39,7 @@ func runListFns(args []string) error {
 	}
 
 	// Find files to process
-	files, err := util.WalkFiles(path, recursiveFlag, includeFlag, excludeFlag)
+	files, err := util.WalkFiles(path, recursiveFlag, includeFlag, excludeFlag, excludeDefaultsFlag)
 	if err != nil {
 		return fmt.Errorf("failed to walk files: %w", err)
 	}

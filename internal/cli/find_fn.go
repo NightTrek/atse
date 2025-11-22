@@ -41,7 +41,7 @@ func runFindFn(cmd *cobra.Command, args []string) error {
 	mgr := parser.New()
 
 	// Collect files
-	files, err := util.WalkFiles(path, recursiveFlag, includeFlag, excludeFlag)
+	files, err := util.WalkFiles(path, recursiveFlag, includeFlag, excludeFlag, excludeDefaultsFlag)
 	if err != nil {
 		return fmt.Errorf("failed to collect files: %w", err)
 	}
@@ -106,6 +106,23 @@ func runFindFn(cmd *cobra.Command, args []string) error {
 			allResults = append(allResults, output.QueryMatchToResult(match, file.Path))
 		}
 		filesProcessed++
+	}
+
+	// Apply limit and warn if needed
+	defaultLimit := 50
+
+	// If no limit was explicitly set by user, apply default for find-fn
+	if limitFlag == 0 {
+		limitFlag = defaultLimit
+	}
+
+	if limitFlag > 0 && len(allResults) > limitFlag {
+		if verboseFlag {
+			fmt.Fprintf(os.Stderr, "Warning: Found %d results, showing first %d (use --limit 0 for all, or --limit N to adjust)\n",
+				len(allResults), limitFlag)
+			fmt.Fprintf(os.Stderr, "Tip: Use --exclude-defaults to filter out test files and reduce noise\n")
+		}
+		allResults = allResults[:limitFlag]
 	}
 
 	// Format and output results

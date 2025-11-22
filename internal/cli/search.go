@@ -52,7 +52,7 @@ func runSearch(cmd *cobra.Command, args []string) error {
 	mgr := parser.New()
 
 	// Collect files
-	files, err := util.WalkFiles(path, recursiveFlag, includeFlag, excludeFlag)
+	files, err := util.WalkFiles(path, recursiveFlag, includeFlag, excludeFlag, excludeDefaultsFlag)
 	if err != nil {
 		return fmt.Errorf("failed to collect files: %w", err)
 	}

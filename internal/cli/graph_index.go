@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/NightTrek/atse/internal/index"
 	"github.com/NightTrek/atse/internal/parser"
 	"github.com/NightTrek/atse/internal/util"
 	sitter "github.com/smacker/go-tree-sitter"
@@ -12,21 +13,21 @@ import (
 
 // SymbolIndex provides fast lookup of symbol definitions across all files
 type SymbolIndex struct {
-	Symbols map[string][]*GraphNode        // Symbol name → locations
-	Types   map[string][]*parser.TypeUsage // Type name → usages
-	Imports map[string][]parser.Import     // File path → imports
-	Calls   map[string][]parser.CallSite   // Function name → call sites
-	Events  map[string][]parser.EventUsage // Event name → emit/listen sites
+	Symbols map[string][]*GraphNode       // Symbol name → locations
+	Types   map[string][]*index.TypeUsage // Type name → usages
+	Imports map[string][]index.Import     // File path → imports
+	Calls   map[string][]index.CallSite   // Function name → call sites
+	Events  map[string][]index.EventUsage // Event name → emit/listen sites
 }
 
 // NewSymbolIndex creates a new empty symbol index
 func NewSymbolIndex() *SymbolIndex {
 	return &SymbolIndex{
 		Symbols: make(map[string][]*GraphNode),
-		Types:   make(map[string][]*parser.TypeUsage),
-		Imports: make(map[string][]parser.Import),
-		Calls:   make(map[string][]parser.CallSite),
-		Events:  make(map[string][]parser.EventUsage),
+		Types:   make(map[string][]*index.TypeUsage),
+		Imports: make(map[string][]index.Import),
+		Calls:   make(map[string][]index.CallSite),
+		Events:  make(map[string][]index.EventUsage),
 	}
 }
 
@@ -143,22 +144,22 @@ func (idx *SymbolIndex) FindSymbol(symbolName string) []*GraphNode {
 }
 
 // FindTypeUsages performs O(1) lookup for type usages
-func (idx *SymbolIndex) FindTypeUsages(typeName string) []*parser.TypeUsage {
+func (idx *SymbolIndex) FindTypeUsages(typeName string) []*index.TypeUsage {
 	return idx.Types[typeName]
 }
 
 // FindImportsFor performs O(1) lookup for imports in a file
-func (idx *SymbolIndex) FindImportsFor(filePath string) []parser.Import {
+func (idx *SymbolIndex) FindImportsFor(filePath string) []index.Import {
 	return idx.Imports[filePath]
 }
 
 // FindCallSites performs O(1) lookup for call sites of a function
-func (idx *SymbolIndex) FindCallSites(functionName string) []parser.CallSite {
+func (idx *SymbolIndex) FindCallSites(functionName string) []index.CallSite {
 	return idx.Calls[functionName]
 }
 
 // FindEventUsages performs O(1) lookup for event usages
-func (idx *SymbolIndex) FindEventUsages(eventName string) []parser.EventUsage {
+func (idx *SymbolIndex) FindEventUsages(eventName string) []index.EventUsage {
 	return idx.Events[eventName]
 }
 

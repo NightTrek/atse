@@ -6,15 +6,67 @@ import (
 	"strings"
 )
 
+// FileCategory classifies a file type (using strict enum pattern)
+type FileCategory string
+
+const (
+	CategoryProduction FileCategory = "production"
+	CategoryTest       FileCategory = "test"
+	CategoryGenerated  FileCategory = "generated"
+	CategoryConfig     FileCategory = "config"
+)
+
+// String returns the string representation
+func (fc FileCategory) String() string {
+	return string(fc)
+}
+
+// IsProduction returns true if the file is production code
+func (fc FileCategory) IsProduction() bool {
+	return fc == CategoryProduction
+}
+
+// IsTest returns true if the file is a test file
+func (fc FileCategory) IsTest() bool {
+	return fc == CategoryTest
+}
+
+// IsGenerated returns true if the file is generated code
+func (fc FileCategory) IsGenerated() bool {
+	return fc == CategoryGenerated
+}
+
+// DefaultExcludePatterns are common patterns to exclude (test files, generated code)
+var DefaultExcludePatterns = []string{
+	"*.test.ts", "*.test.js", "*.test.tsx", "*.test.jsx",
+	"*.spec.ts", "*.spec.js", "*.spec.tsx", "*.spec.jsx",
+	"*_test.go", "**/*_test.go", // Go test files
+	"__tests__/**", "**/__tests__/**",
+	"**/test/**", "**/tests/**",
+	"**/*.generated.*", "**/generated/**",
+	"**/*.pb.go", "**/*.pb.ts", "**/*.pb.js", // Protocol buffers
+	"**/*.d.ts", // TypeScript declarations (often generated)
+	"**/node_modules/**", "**/vendor/**",
+	"**/__mocks__/**", "**/__fixtures__/**",
+	"**/dist/**", "**/build/**", "**/.next/**",
+}
+
 // FileMatch represents a matched file
 type FileMatch struct {
 	Path     string
 	Language string
+	Category FileCategory
 }
 
 // WalkFiles walks a directory and returns files matching the criteria
-func WalkFiles(rootPath string, recursive bool, includePatterns, excludePatterns []string) ([]FileMatch, error) {
+func WalkFiles(rootPath string, recursive bool, includePatterns, excludePatterns []string, applyDefaultExcludes bool) ([]FileMatch, error) {
 	var matches []FileMatch
+
+	// Merge user excludes with defaults if requested
+	effectiveExcludes := excludePatterns
+	if applyDefaultExcludes {
+		effectiveExcludes = append(effectiveExcludes, DefaultExcludePatterns...)
+	}
 
 	// Convert to absolute path
 	absPath, err := filepath.Abs(rootPath)
@@ -30,8 +82,12 @@ func WalkFiles(rootPath string, recursive bool, includePatterns, excludePatterns
 
 	if !info.IsDir() {
 		// Single file - check if it matches patterns
-		if shouldIncludeFile(absPath, includePatterns, excludePatterns) {
-			matches = append(matches, FileMatch{Path: absPath})
+		if shouldIncludeFile(absPath, includePatterns, effectiveExcludes) {
+			category := ClassifyFile(absPath)
+			matches = append(matches, FileMatch{
+				Path:     absPath,
+				Category: category,
+			})
 		}
 		return matches, nil
 	}
@@ -51,8 +107,12 @@ func WalkFiles(rootPath string, recursive bool, includePatterns, excludePatterns
 		}
 
 		// Check if file should be included
-		if shouldIncludeFile(path, includePatterns, excludePatterns) {
-			matches = append(matches, FileMatch{Path: path})
+		if shouldIncludeFile(path, includePatterns, effectiveExcludes) {
+			category := ClassifyFile(path)
+			matches = append(matches, FileMatch{
+				Path:     path,
+				Category: category,
+			})
 		}
 
 		return nil
@@ -121,4 +181,43 @@ func isSupportedFile(path string) bool {
 		".py":  true,
 	}
 	return supportedExts[ext]
+}
+
+// ClassifyFile determines if a file is production, test, generated, or config
+func ClassifyFile(path string) FileCategory {
+	baseName := filepath.Base(path)
+	lowerPath := strings.ToLower(path)
+
+	// Check for test indicators
+	testPatterns := []string{
+		".test.", ".spec.", "__test", "__tests__",
+		"/test/", "/tests/", "__mocks__", "__fixtures__",
+	}
+	for _, pattern := range testPatterns {
+		if strings.Contains(lowerPath, pattern) {
+			return CategoryTest
+		}
+	}
+
+	// Check for generated indicators
+	generatedPatterns := []string{
+		".generated.", "/generated/", ".pb.", "_pb.",
+		".d.ts", // TypeScript declarations are often generated
+		"/dist/", "/build/", "/.next/",
+	}
+	for _, pattern := range generatedPatterns {
+		if strings.Contains(lowerPath, pattern) {
+			return CategoryGenerated
+		}
+	}
+
+	// Check for config files
+	configExts := []string{".json", ".yaml", ".yml", ".toml", ".ini", ".config"}
+	for _, ext := range configExts {
+		if strings.HasSuffix(baseName, ext) {
+			return CategoryConfig
+		}
+	}
+
+	return CategoryProduction
 }

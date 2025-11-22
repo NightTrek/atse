@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/NightTrek/atse/internal/parser"
+	"github.com/NightTrek/atse/internal/index"
 )
 
 // ConnectionType represents the type of relationship between symbols
@@ -37,7 +37,7 @@ type Connection struct {
 
 // ConnectionFinder is an interface for different connection strategies
 type ConnectionFinder interface {
-	FindConnections(node *GraphNode, index *SymbolIndex) []Connection
+	FindConnections(node *GraphNode, idx *SymbolIndex) []Connection
 	Type() ConnectionType
 }
 
@@ -50,16 +50,16 @@ func NewCallsConnectionFinder() ConnectionFinder {
 }
 
 // FindConnections finds all functions that this node calls
-func (cf *CallsConnectionFinder) FindConnections(node *GraphNode, index *SymbolIndex) []Connection {
+func (cf *CallsConnectionFinder) FindConnections(node *GraphNode, idx *SymbolIndex) []Connection {
 	var connections []Connection
 
 	// Find all call sites in this node's file where this symbol is the caller
-	for calledSymbol, callSites := range index.Calls {
+	for calledSymbol, callSites := range idx.Calls {
 		for _, site := range callSites {
 			// Check if this node is the caller
 			if site.CallerSymbol == node.Symbol && site.CallerFilePath == node.FilePath {
 				// Find the called symbol's definition
-				calledNodes := index.FindSymbol(calledSymbol)
+				calledNodes := idx.FindSymbol(calledSymbol)
 				for _, calledNode := range calledNodes {
 					connections = append(connections, Connection{
 						From: node,
@@ -97,12 +97,12 @@ func NewTypesConnectionFinder() ConnectionFinder {
 }
 
 // FindConnections finds symbols that share types with this node
-func (tf *TypesConnectionFinder) FindConnections(node *GraphNode, index *SymbolIndex) []Connection {
+func (tf *TypesConnectionFinder) FindConnections(node *GraphNode, idx *SymbolIndex) []Connection {
 	var connections []Connection
 
 	// Find types used in this node's file
 	usedTypes := make(map[string]bool)
-	for typeName, usages := range index.Types {
+	for typeName, usages := range idx.Types {
 		for _, usage := range usages {
 			if usage.FilePath == node.FilePath {
 				usedTypes[typeName] = true
@@ -112,11 +112,11 @@ func (tf *TypesConnectionFinder) FindConnections(node *GraphNode, index *SymbolI
 
 	// Find other symbols that use the same types
 	for typeName := range usedTypes {
-		usages := index.FindTypeUsages(typeName)
+		usages := idx.FindTypeUsages(typeName)
 		for _, usage := range usages {
 			if usage.FilePath != node.FilePath {
 				// Find symbols defined in this file
-				targetSymbols := index.FindSymbol(usage.FilePath)
+				targetSymbols := idx.FindSymbol(usage.FilePath)
 				for _, targetNode := range targetSymbols {
 					if targetNode.FilePath == usage.FilePath {
 						connections = append(connections, Connection{
@@ -156,11 +156,11 @@ func NewImportsConnectionFinder() ConnectionFinder {
 }
 
 // FindConnections finds symbols in imported modules
-func (icf *ImportsConnectionFinder) FindConnections(node *GraphNode, index *SymbolIndex) []Connection {
+func (icf *ImportsConnectionFinder) FindConnections(node *GraphNode, idx *SymbolIndex) []Connection {
 	var connections []Connection
 
 	// Get imports for this node's file
-	imports := index.FindImportsFor(node.FilePath)
+	imports := idx.FindImportsFor(node.FilePath)
 
 	// For each import, find symbols in the imported modules
 	for _, imp := range imports {
@@ -169,7 +169,7 @@ func (icf *ImportsConnectionFinder) FindConnections(node *GraphNode, index *Symb
 
 		for _, importedFile := range importedFiles {
 			// Find all symbols in the imported file
-			for _, symbols := range index.Symbols {
+			for _, symbols := range idx.Symbols {
 				for _, symbol := range symbols {
 					if symbol.FilePath == importedFile {
 						connections = append(connections, Connection{
@@ -230,12 +230,12 @@ func NewDataFlowConnectionFinder() ConnectionFinder {
 }
 
 // FindConnections finds data flow connections (simplified - just returns calls for now)
-func (df *DataFlowConnectionFinder) FindConnections(node *GraphNode, index *SymbolIndex) []Connection {
+func (df *DataFlowConnectionFinder) FindConnections(node *GraphNode, idx *SymbolIndex) []Connection {
 	// For now, data flow is approximated by call relationships
 	// A full implementation would track variables passed between functions
 	// This is a placeholder that can be enhanced later
 	callFinder := NewCallsConnectionFinder()
-	connections := callFinder.FindConnections(node, index)
+	connections := callFinder.FindConnections(node, idx)
 
 	// Update metadata to indicate data flow
 	for i := range connections {
@@ -265,12 +265,12 @@ func NewEventsConnectionFinder() ConnectionFinder {
 }
 
 // FindConnections finds event-based connections
-func (ef *EventsConnectionFinder) FindConnections(node *GraphNode, index *SymbolIndex) []Connection {
+func (ef *EventsConnectionFinder) FindConnections(node *GraphNode, idx *SymbolIndex) []Connection {
 	var connections []Connection
 
 	// Find events emitted or listened to in this node's file
-	eventsInFile := make(map[string][]parser.EventUsage)
-	for eventName, usages := range index.Events {
+	eventsInFile := make(map[string][]index.EventUsage)
+	for eventName, usages := range idx.Events {
 		for _, usage := range usages {
 			if usage.FilePath == node.FilePath {
 				eventsInFile[eventName] = append(eventsInFile[eventName], usage)
@@ -280,11 +280,11 @@ func (ef *EventsConnectionFinder) FindConnections(node *GraphNode, index *Symbol
 
 	// For each event, find other files that emit/listen to the same event
 	for eventName := range eventsInFile {
-		allUsages := index.FindEventUsages(eventName)
+		allUsages := idx.FindEventUsages(eventName)
 		for _, usage := range allUsages {
 			if usage.FilePath != node.FilePath {
 				// Find symbols in the other file
-				for _, symbols := range index.Symbols {
+				for _, symbols := range idx.Symbols {
 					for _, symbol := range symbols {
 						if symbol.FilePath == usage.FilePath {
 							connections = append(connections, Connection{
