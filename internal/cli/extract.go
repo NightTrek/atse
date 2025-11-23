@@ -64,7 +64,12 @@ func runExtract(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("ripgrep (rg) not found in PATH")
 	}
 
-	candidates, err := rgClient.Search(symbol, path)
+	searchOpts := &ripgrep.SearchOptions{
+		Includes: includeFlag,
+		Excludes: excludeFlag,
+	}
+
+	candidates, err := rgClient.Search(symbol, path, searchOpts)
 	if err != nil {
 		return err
 	}

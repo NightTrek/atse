@@ -9,6 +9,12 @@ import (
 	"time"
 )
 
+// SearchOptions configures the search
+type SearchOptions struct {
+	Includes []string
+	Excludes []string
+}
+
 // Client wraps the ripgrep executable
 type Client struct {
 	Executable string
@@ -24,13 +30,25 @@ func New() *Client {
 }
 
 // Search executes a ripgrep search and returns parsed matches
-func (c *Client) Search(query, path string) ([]FileMatch, error) {
+func (c *Client) Search(query, path string, opts *SearchOptions) ([]FileMatch, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.Timeout)
 	defer cancel()
 
-	// rg arguments: --json outputs structured data, --case-sensitive/smart-case handled by user or defaults
-	// limiting depth or files can be added here if needed
-	args := []string{"--json", "-e", query, path}
+	// rg arguments: --json outputs structured data
+	args := []string{"--json"}
+
+	// Add file filters
+	if opts != nil {
+		for _, inc := range opts.Includes {
+			args = append(args, "--glob", inc)
+		}
+		for _, exc := range opts.Excludes {
+			args = append(args, "--glob", "!"+exc)
+		}
+	}
+
+	// Add query and path
+	args = append(args, "-e", query, path)
 
 	cmd := exec.CommandContext(ctx, c.Executable, args...)
 	stdout, err := cmd.StdoutPipe()

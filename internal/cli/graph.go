@@ -62,7 +62,12 @@ func runGraph(cmd *cobra.Command, args []string) error {
 
 	// We search for the symbol definition specifically if possible, but for now
 	// general search is safer to find usage + definition
-	candidates, err := rgClient.Search(symbol, path)
+	searchOpts := &ripgrep.SearchOptions{
+		Includes: includeFlag,
+		Excludes: excludeFlag,
+	}
+
+	candidates, err := rgClient.Search(symbol, path, searchOpts)
 	if err != nil {
 		return fmt.Errorf("ripgrep failed: %w", err)
 	}

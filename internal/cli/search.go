@@ -60,7 +60,12 @@ func runSearch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("ripgrep (rg) not found in PATH. Please install ripgrep to use hybrid search.")
 	}
 
-	candidates, err := rgClient.Search(query, path)
+	searchOpts := &ripgrep.SearchOptions{
+		Includes: includeFlag,
+		Excludes: excludeFlag,
+	}
+
+	candidates, err := rgClient.Search(query, path, searchOpts)
 	if err != nil {
 		return fmt.Errorf("ripgrep failed: %w", err)
 	}

@@ -19,9 +19,9 @@ type TextData struct {
 }
 
 type Submatch struct {
-	Match string `json:"match"`
-	Start int    `json:"start"`
-	End   int    `json:"end"`
+	Match TextData `json:"match"`
+	Start int      `json:"start"`
+	End   int      `json:"end"`
 }
 
 // FileMatch represents a file containing a match
