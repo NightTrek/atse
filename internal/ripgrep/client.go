@@ -2,6 +2,7 @@ package ripgrep
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -51,6 +52,11 @@ func (c *Client) Search(query, path string, opts *SearchOptions) ([]FileMatch, e
 	args = append(args, "-e", query, path)
 
 	cmd := exec.CommandContext(ctx, c.Executable, args...)
+
+	// Capture stderr
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get stdout pipe: %w", err)
@@ -99,6 +105,11 @@ func (c *Client) Search(query, path string, opts *SearchOptions) ([]FileMatch, e
 		// Exit code 1 means no matches found, which is not an error for us
 		if exitError, ok := err.(*exec.ExitError); ok && exitError.ExitCode() == 1 {
 			return matches, nil
+		}
+
+		errMsg := stderr.String()
+		if errMsg != "" {
+			return nil, fmt.Errorf("ripgrep failed: %s", errMsg)
 		}
 		return nil, fmt.Errorf("ripgrep failed: %w", err)
 	}
