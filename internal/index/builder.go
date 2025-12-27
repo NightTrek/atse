@@ -1,11 +1,12 @@
 package index
 
 import (
-	"fmt"
-	"os"
-	"strings"
+    "fmt"
+    "os"
+    "strings"
 
-	sitter "github.com/smacker/go-tree-sitter"
+    "github.com/NightTrek/atse/internal/langspec"
+    sitter "github.com/smacker/go-tree-sitter"
 )
 
 // ParserInterface defines the methods needed from parser.Manager
@@ -29,7 +30,8 @@ type FileInfo struct {
 
 // BuildIndex parses all files and builds a comprehensive symbol index
 func BuildIndex(parser ParserInterface, files []FileInfo, verbose bool) (*SymbolIndex, error) {
-	idx := NewSymbolIndex()
+    idx := NewSymbolIndex()
+    registry := langspec.DefaultRegistry()
 
 	if verbose {
 		fmt.Fprintf(os.Stderr, "\nBuilding symbol index...\n")
@@ -40,10 +42,10 @@ func BuildIndex(parser ParserInterface, files []FileInfo, verbose bool) (*Symbol
 			fmt.Fprintf(os.Stderr, "  Indexed: %d/%d files\n", i+1, len(files))
 		}
 
-		if err := indexFile(parser, idx, file.Path); err != nil {
-			if verbose {
-				fmt.Fprintf(os.Stderr, "  Warning: failed to index %s: %v\n", file.Path, err)
-			}
+        if err := indexFile(parser, idx, file.Path, registry); err != nil {
+            if verbose {
+                fmt.Fprintf(os.Stderr, "  Warning: failed to index %s: %v\n", file.Path, err)
+            }
 			continue
 		}
 
@@ -63,7 +65,7 @@ func BuildIndex(parser ParserInterface, files []FileInfo, verbose bool) (*Symbol
 }
 
 // indexFile parses a single file and adds all its symbols to the indices
-func indexFile(parser ParserInterface, idx *SymbolIndex, filePath string) error {
+func indexFile(parser ParserInterface, idx *SymbolIndex, filePath string, registry *langspec.Registry) error {
 	// Parse the file
 	tree, err := parser.ParseFile(filePath)
 	if err != nil {
@@ -81,9 +83,9 @@ func indexFile(parser ParserInterface, idx *SymbolIndex, filePath string) error 
 	}
 
 	// Index symbols (functions, classes, methods)
-	if err := indexSymbols(parser, idx, tree, langName, content, filePath); err != nil {
-		return fmt.Errorf("failed to index symbols: %w", err)
-	}
+    if err := indexSymbols(parser, idx, tree, langName, content, filePath, registry); err != nil {
+        return fmt.Errorf("failed to index symbols: %w", err)
+    }
 
 	// Index type usages
 	typeUsages := parser.ExtractTypeUsages(tree, langName, content, filePath)
@@ -111,8 +113,8 @@ func indexFile(parser ParserInterface, idx *SymbolIndex, filePath string) error 
 }
 
 // indexSymbols indexes all symbol definitions in a file
-func indexSymbols(parser ParserInterface, idx *SymbolIndex, tree *sitter.Tree, langName string, content []byte, filePath string) error {
-	queries := BuildSymbolQueries(langName)
+func indexSymbols(parser ParserInterface, idx *SymbolIndex, tree *sitter.Tree, langName string, content []byte, filePath string, registry *langspec.Registry) error {
+    queries := registry.SymbolQueries(langName)
 
 	for symbolType, queryString := range queries {
 		results, err := parser.Query(tree, queryString, langName, content)

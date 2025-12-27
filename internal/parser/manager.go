@@ -1,42 +1,42 @@
 package parser
 
 import (
-	"context"
-	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
-	"sync"
+    "context"
+    "fmt"
+    "os"
+    "path/filepath"
+    "strings"
+    "sync"
 
-	"github.com/NightTrek/atse/internal/index"
-	sitter "github.com/smacker/go-tree-sitter"
-	"github.com/smacker/go-tree-sitter/golang"
-	"github.com/smacker/go-tree-sitter/javascript"
-	"github.com/smacker/go-tree-sitter/python"
-	"github.com/smacker/go-tree-sitter/typescript/typescript"
+    "github.com/NightTrek/atse/internal/index"
+    "github.com/NightTrek/atse/internal/langspec"
+    sitter "github.com/smacker/go-tree-sitter"
 )
 
 // Manager handles Tree-sitter parsing, language loading, and caching
 type Manager struct {
-	languages map[string]*sitter.Language
-	trees     map[string]*sitter.Tree
-	contents  map[string][]byte // Store file contents for node extraction
+    languages map[string]*sitter.Language
+    trees     map[string]*sitter.Tree
+    contents  map[string][]byte // Store file contents for node extraction
 
-	// Symbol index cache (for performance optimization)
-	symbolIndex interface{} // Will be *SymbolIndex from cli package
-	indexBuilt  bool
-	indexFiles  []string // Track which files are in the index
+    // Symbol index cache (for performance optimization)
+    symbolIndex interface{} // Will be *SymbolIndex from cli package
+    indexBuilt  bool
+    indexFiles  []string // Track which files are in the index
 
-	mu sync.RWMutex
+    registry *langspec.Registry
+
+    mu sync.RWMutex
 }
 
 // New creates a new parser manager
 func New() *Manager {
-	return &Manager{
-		languages: make(map[string]*sitter.Language),
-		trees:     make(map[string]*sitter.Tree),
-		contents:  make(map[string][]byte),
-	}
+    return &Manager{
+        languages: make(map[string]*sitter.Language),
+        trees:     make(map[string]*sitter.Tree),
+        contents:  make(map[string][]byte),
+        registry:  langspec.DefaultRegistry(),
+    }
 }
 
 // LoadLanguage loads a Tree-sitter language grammar
@@ -49,39 +49,35 @@ func (m *Manager) LoadLanguage(langName string) error {
 		return nil
 	}
 
-	var lang *sitter.Language
-	switch langName {
-	case "go":
-		lang = golang.GetLanguage()
-	case "javascript", "js":
-		lang = javascript.GetLanguage()
-	case "typescript", "ts":
-		lang = typescript.GetLanguage()
-	case "python", "py":
-		lang = python.GetLanguage()
-	default:
-		return fmt.Errorf("unsupported language: %s", langName)
-	}
+    cfg, ok := m.registry.Resolve(langName)
+    if !ok || cfg.Load == nil {
+        return fmt.Errorf("unsupported language: %s", langName)
+    }
 
-	m.languages[langName] = lang
-	return nil
+    lang := cfg.Load()
+
+    m.languages[langName] = lang
+    return nil
+}
+
+// BuildFunctionCallQuery renders a language-aware Tree-sitter query for function/method calls.
+// Returns an empty string if the language does not define a template.
+func (m *Manager) BuildFunctionCallQuery(langName, funcName string) string {
+    return m.registry.BuildFunctionCallQuery(langName, funcName)
+}
+
+// BuildSymbolQueries exposes symbol query maps for consumers that need them.
+func BuildSymbolQueries(langName string) map[string]string {
+    return langspec.DefaultRegistry().SymbolQueries(langName)
 }
 
 // InferLanguage determines the language from a file extension
 func (m *Manager) InferLanguage(filePath string) (string, error) {
-	ext := strings.ToLower(filepath.Ext(filePath))
-	switch ext {
-	case ".go":
-		return "go", nil
-	case ".js", ".jsx", ".mjs", ".cjs":
-		return "javascript", nil
-	case ".ts", ".tsx":
-		return "typescript", nil
-	case ".py":
-		return "python", nil
-	default:
-		return "", fmt.Errorf("unsupported file extension: %s", ext)
-	}
+    ext := strings.ToLower(filepath.Ext(filePath))
+    if cfg, ok := m.registry.ResolveByExtension(ext); ok {
+        return cfg.Name, nil
+    }
+    return "", fmt.Errorf("unsupported file extension: %s", ext)
 }
 
 // ParseFile parses a file and caches the syntax tree
@@ -152,13 +148,13 @@ func (m *Manager) GetContent(filePath string) ([]byte, error) {
 
 // Query executes a Tree-sitter query on a syntax tree
 func (m *Manager) Query(tree *sitter.Tree, queryString string, langName string, content []byte) ([]*QueryMatch, error) {
-	m.mu.RLock()
-	lang, exists := m.languages[langName]
-	m.mu.RUnlock()
+    m.mu.RLock()
+    lang, exists := m.languages[langName]
+    m.mu.RUnlock()
 
-	if !exists {
-		return nil, fmt.Errorf("language %s not loaded", langName)
-	}
+    if !exists {
+        return nil, fmt.Errorf("language %s not loaded", langName)
+    }
 
 	query, err := sitter.NewQuery([]byte(queryString), lang)
 	if err != nil {
@@ -327,130 +323,86 @@ type NodeInfo struct {
 
 // ExtractTypeUsages finds all type references in a file
 func (m *Manager) ExtractTypeUsages(tree *sitter.Tree, langName string, content []byte, filePath string) []*index.TypeUsage {
-	var usages []*index.TypeUsage
+    var usages []*index.TypeUsage
 
-	// Build queries for type usages based on language
-	var queries []string
-	switch langName {
-	case "typescript", "javascript":
-		queries = []string{
-			`(type_annotation (type_identifier) @type)`,
-			`(type_annotation (generic_type name: (type_identifier) @type))`,
-		}
-	case "go":
-		queries = []string{
-			`(type_identifier) @type`,
-			`(qualified_type package: (package_identifier) name: (type_identifier) @type)`,
-		}
-	case "python":
-		queries = []string{
-			`(type (identifier) @type)`,
-		}
-	}
+    queries := m.registry.TypeUsageQueries(langName)
+    for _, queryString := range queries {
+        results, err := m.Query(tree, queryString, langName, content)
+        if err != nil {
+            continue
+        }
 
-	for _, queryString := range queries {
-		results, err := m.Query(tree, queryString, langName, content)
-		if err != nil {
-			continue
-		}
+        for _, result := range results {
+            typeName := strings.TrimSpace(result.Text)
+            if typeName != "" {
+                usages = append(usages, &index.TypeUsage{
+                    TypeName:  typeName,
+                    UsageType: "reference",
+                    FilePath:  filePath,
+                    Line:      result.StartPosition.Row,
+                })
+            }
+        }
+    }
 
-		for _, result := range results {
-			typeName := strings.TrimSpace(result.Text)
-			if typeName != "" {
-				usages = append(usages, &index.TypeUsage{
-					TypeName:  typeName,
-					UsageType: "reference",
-					FilePath:  filePath,
-					Line:      result.StartPosition.Row,
-				})
-			}
-		}
-	}
-
-	return usages
+    return usages
 }
 
 // ExtractImports parses import/require/include statements
 func (m *Manager) ExtractImports(tree *sitter.Tree, langName string, content []byte, filePath string) []index.Import {
-	var imports []index.Import
+    var imports []index.Import
 
-	// Build queries for imports based on language
-	var queryString string
-	switch langName {
-	case "typescript", "javascript":
-		queryString = `(import_statement source: (string) @path)`
-	case "go":
-		queryString = `(import_spec path: (interpreted_string_literal) @path)`
-	case "python":
-		queryString = `(import_statement name: (dotted_name) @path)`
-	}
+    queries := m.registry.ImportQueries(langName)
+    for _, queryString := range queries {
+        results, err := m.Query(tree, queryString, langName, content)
+        if err != nil {
+            continue
+        }
 
-	if queryString == "" {
-		return imports
-	}
+        for _, result := range results {
+            importPath := strings.Trim(strings.TrimSpace(result.Text), "\"'`")
+            if importPath != "" {
+                imports = append(imports, index.Import{
+                    ImportPath: importPath,
+                    FilePath:   filePath,
+                    Line:       result.StartPosition.Row,
+                })
+            }
+        }
+    }
 
-	results, err := m.Query(tree, queryString, langName, content)
-	if err != nil {
-		return imports
-	}
-
-	for _, result := range results {
-		importPath := strings.Trim(strings.TrimSpace(result.Text), "\"'`")
-		if importPath != "" {
-			imports = append(imports, index.Import{
-				ImportPath: importPath,
-				FilePath:   filePath,
-				Line:       result.StartPosition.Row,
-			})
-		}
-	}
-
-	return imports
+    return imports
 }
 
 // ExtractCallSites finds all function call expressions
 func (m *Manager) ExtractCallSites(tree *sitter.Tree, langName string, content []byte, filePath string) []index.CallSite {
-	var callSites []index.CallSite
+    var callSites []index.CallSite
 
-	// Build queries for function calls based on language
-	var queryString string
-	switch langName {
-	case "typescript", "javascript":
-		queryString = `(call_expression function: (identifier) @name)`
-	case "go":
-		queryString = `(call_expression function: (identifier) @name)`
-	case "python":
-		queryString = `(call function: (identifier) @name)`
-	}
+    queries := m.registry.CallCaptureQueries(langName)
+    for _, queryString := range queries {
+        results, err := m.Query(tree, queryString, langName, content)
+        if err != nil {
+            continue
+        }
 
-	if queryString == "" {
-		return callSites
-	}
+        for _, result := range results {
+            calledName := strings.TrimSpace(result.Text)
+            if calledName == "" {
+                continue
+            }
 
-	results, err := m.Query(tree, queryString, langName, content)
-	if err != nil {
-		return callSites
-	}
+            caller := m.findContainingFunction(tree, result.StartPosition.Row, content)
 
-	// For each call, try to find the containing function
-	for _, result := range results {
-		calledName := strings.TrimSpace(result.Text)
-		if calledName == "" {
-			continue
-		}
+            callSites = append(callSites, index.CallSite{
+                CallerSymbol:   caller,
+                CallerFilePath: filePath,
+                CallerLine:     result.StartPosition.Row,
+                CalledSymbol:   calledName,
+            })
+        }
+    }
 
-		// Find containing function
-		caller := m.findContainingFunction(tree, result.StartPosition.Row, content)
-
-		callSites = append(callSites, index.CallSite{
-			CallerSymbol:   caller,
-			CallerFilePath: filePath,
-			CallerLine:     result.StartPosition.Row,
-			CalledSymbol:   calledName,
-		})
-	}
-
-	return callSites
+    return callSites
 }
 
 // findContainingFunction finds the function that contains a given line
@@ -487,51 +439,39 @@ func (m *Manager) findContainingFunction(tree *sitter.Tree, line uint32, content
 
 // ExtractEventPatterns finds event emitter/listener patterns
 func (m *Manager) ExtractEventPatterns(tree *sitter.Tree, langName string, content []byte, filePath string) []index.EventUsage {
-	var events []index.EventUsage
+    var events []index.EventUsage
 
-	// For now, use a simple pattern: look for .on(), .emit(), addEventListener calls
-	// This is language-agnostic at the call site level
-	var queryString string
-	switch langName {
-	case "typescript", "javascript":
-		queryString = `(call_expression
-			function: (member_expression
-				property: (property_identifier) @method)
-			arguments: (arguments (string) @event))`
-	default:
-		return events
-	}
+    queries := m.registry.EventQueries(langName)
+    for _, queryString := range queries {
+        results, err := m.Query(tree, queryString, langName, content)
+        if err != nil {
+            continue
+        }
 
-	results, err := m.Query(tree, queryString, langName, content)
-	if err != nil {
-		return events
-	}
+        for i := 0; i+1 < len(results); i += 2 {
+            methodName := strings.TrimSpace(results[i].Text)
+            eventName := strings.Trim(strings.TrimSpace(results[i+1].Text), "\"'`")
 
-	// Process results in pairs (method, event)
-	for i := 0; i+1 < len(results); i += 2 {
-		methodName := strings.TrimSpace(results[i].Text)
-		eventName := strings.Trim(strings.TrimSpace(results[i+1].Text), "\"'`")
+            eventType := ""
+            switch methodName {
+            case "on", "addEventListener", "addListener", "once":
+                eventType = "listen"
+            case "emit", "dispatchEvent", "fire", "trigger":
+                eventType = "emit"
+            default:
+                continue
+            }
 
-		// Check if it's an event-related method
-		eventType := ""
-		switch methodName {
-		case "on", "addEventListener", "addListener", "once":
-			eventType = "listen"
-		case "emit", "dispatchEvent", "fire", "trigger":
-			eventType = "emit"
-		default:
-			continue
-		}
+            if eventName != "" && eventType != "" {
+                events = append(events, index.EventUsage{
+                    EventName: eventName,
+                    Type:      eventType,
+                    FilePath:  filePath,
+                    Line:      results[i].StartPosition.Row,
+                })
+            }
+        }
+    }
 
-		if eventName != "" && eventType != "" {
-			events = append(events, index.EventUsage{
-				EventName: eventName,
-				Type:      eventType,
-				FilePath:  filePath,
-				Line:      results[i].StartPosition.Row,
-			})
-		}
-	}
-
-	return events
+    return events
 }

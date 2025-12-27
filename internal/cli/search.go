@@ -197,12 +197,12 @@ func runSearch(cmd *cobra.Command, args []string) error {
 func extractSymbolsForFile(mgr *parser.Manager, tree *sitter.Tree, langName string, content []byte, filePath string) []*index.SymbolNode {
 	var symbols []*index.SymbolNode
 
-	queries := buildSymbolQueries(langName)
-	for symbolType, queryString := range queries {
-		results, err := mgr.Query(tree, queryString, langName, content)
-		if err != nil {
-			continue
-		}
+    queries := parser.BuildSymbolQueries(langName)
+    for symbolType, queryString := range queries {
+        results, err := mgr.Query(tree, queryString, langName, content)
+        if err != nil {
+            continue
+        }
 
 		for _, result := range results {
 			name := strings.TrimSpace(result.Text)
@@ -219,27 +219,6 @@ func extractSymbolsForFile(mgr *parser.Manager, tree *sitter.Tree, langName stri
 		}
 	}
 	return symbols
-}
-
-// buildSymbolQueries returns the Tree-sitter queries for different languages
-// Note: This duplicates logic from index/builder.go, should be shared eventually
-func buildSymbolQueries(langName string) map[string]string {
-	queries := make(map[string]string)
-	switch langName {
-	case "typescript", "javascript":
-		queries["function"] = `(function_declaration name: (identifier) @name)`
-		queries["class"] = `(class_declaration name: (type_identifier) @name)`
-		queries["method"] = `(method_definition name: (property_identifier) @name)`
-		queries["const"] = `(lexical_declaration (variable_declarator name: (identifier) @name)) @const`
-	case "go":
-		queries["function"] = `(function_declaration name: (identifier) @name)`
-		queries["method"] = `(method_declaration name: (field_identifier) @name)`
-		queries["type"] = `(type_spec name: (type_identifier) @name)`
-	case "python":
-		queries["function"] = `(function_definition name: (identifier) @name)`
-		queries["class"] = `(class_definition name: (identifier) @name)`
-	}
-	return queries
 }
 
 // NOTE: These helper functions (matchesQuery, calculateScore, sortMatches, etc.)
