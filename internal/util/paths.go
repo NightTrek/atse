@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/NightTrek/atse/internal/langspec"
 )
 
 // FileCategory classifies a file type (using strict enum pattern)
@@ -170,17 +172,8 @@ func matchPattern(path, pattern string) bool {
 // isSupportedFile checks if a file has a supported extension
 func isSupportedFile(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
-	supportedExts := map[string]bool{
-		".go":  true,
-		".js":  true,
-		".jsx": true,
-		".mjs": true,
-		".cjs": true,
-		".ts":  true,
-		".tsx": true,
-		".py":  true,
-	}
-	return supportedExts[ext]
+	_, ok := langspec.DefaultRegistry().ResolveByExtension(ext)
+	return ok
 }
 
 // ClassifyFile determines if a file is production, test, generated, or config

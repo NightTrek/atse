@@ -85,7 +85,7 @@ func runFindFn(cmd *cobra.Command, args []string) error {
 		}
 
 		// Build language-specific query for function calls
-		queryString := buildFunctionCallQuery(langName, funcName)
+    queryString := mgr.BuildFunctionCallQuery(langName, funcName)
 		if queryString == "" {
 			if verboseFlag {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: unsupported language for %s\n", file.Path)

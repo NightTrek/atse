@@ -110,7 +110,7 @@ func (idx *SymbolIndex) indexFile(mgr *parser.Manager, filePath string) error {
 
 // indexSymbols indexes all symbol definitions in a file
 func (idx *SymbolIndex) indexSymbols(mgr *parser.Manager, tree *sitter.Tree, langName string, content []byte, filePath string) error {
-	queries := buildSymbolQueries(langName)
+    queries := parser.BuildSymbolQueries(langName)
 
 	for symbolType, queryString := range queries {
 		results, err := mgr.Query(tree, queryString, langName, content)
