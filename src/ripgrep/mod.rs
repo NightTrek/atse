@@ -44,6 +44,9 @@ impl Client {
         opts: &SearchOptions,
     ) -> anyhow::Result<Vec<FileMatch>> {
         let mut args = vec!["--json".to_string()];
+        // Respect the configured timeout to avoid runaway searches.
+        args.push("--timeout".to_string());
+        args.push(self.timeout.as_millis().to_string());
         for inc in &opts.includes {
             args.push("--glob".into());
             args.push(inc.clone());
