@@ -11,6 +11,9 @@ permissions:
 
 jobs:
   prepare:
+    # Paused 2026-11-06: this Go release workflow tags Rust main before failing builds.
+    # Re-enable only after building/testing Rust artifacts before tagging or publishing.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
